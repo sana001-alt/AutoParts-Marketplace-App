@@ -76,9 +76,9 @@
       "schema": { "$ref": "#/entities/User" },
       "description": "Collection of user account data"
     },
-    "spare_parts/{partId}": {
+    "products/listings/items/{partId}": {
       "schema": { "$ref": "#/entities/SparePart" },
-      "description": "Collection of car spare part listings"
+      "description": "Collection of car spare part listings under products/listings"
     },
     "chats/{chatId}": {
       "schema": { "$ref": "#/entities/Chat" },

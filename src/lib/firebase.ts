@@ -23,6 +23,12 @@ import {
   updateDoc,
   onSnapshot
 } from "firebase/firestore";
+import { 
+  getStorage, 
+  ref, 
+  uploadString, 
+  getDownloadURL 
+} from "firebase/storage";
 import { SparePart, User, Chat, Message, SellerReview } from "../types";
 import { INITIAL_SPARE_PARTS, INITIAL_SELLER_REVIEWS } from "../data/mockData";
 
@@ -47,6 +53,7 @@ const isFirebaseConfigured = !!(
 let app: any = null;
 let auth: any = null;
 let db: any = null;
+let storage: any = null;
 let useFirebase = false;
 
 if (isFirebaseConfigured) {
@@ -54,6 +61,7 @@ if (isFirebaseConfigured) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app);
     useFirebase = true;
     console.log("Firebase initialized successfully with configuration:", firebaseConfig.projectId);
   } catch (error) {
@@ -119,14 +127,71 @@ if (!localStorage.getItem(LOCAL_STORAGE_REVIEWS_KEY)) {
 // DATABASE SERVICES (FIRESTORE / LOCALSTORAGE)
 // ----------------------------------------------------
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth?.currentUser?.uid || null,
+      email: auth?.currentUser?.email || null,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+export async function uploadProductImage(base64Data: string, partId: string): Promise<string> {
+  if (useFirebase && storage) {
+    try {
+      let cleanData = base64Data;
+      const formatMatch = base64Data.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
+      if (formatMatch) {
+        cleanData = base64Data.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+      }
+      
+      const storageRef = ref(storage, `products/listings/${partId}/image_${Date.now()}.jpg`);
+      await uploadString(storageRef, cleanData, "base64", {
+        contentType: "image/jpeg"
+      });
+      const downloadUrl = await getDownloadURL(storageRef);
+      console.log("Image uploaded successfully to Firebase Storage:", downloadUrl);
+      return downloadUrl;
+    } catch (error) {
+      console.error("Firebase Storage upload failed, using fallback base64 string:", error);
+    }
+  }
+  return base64Data;
+}
+
 export function isUsingFirebase(): boolean {
   return useFirebase;
 }
 
 export async function fetchSpareParts(): Promise<SparePart[]> {
   if (useFirebase && db) {
+    const path = "products/listings/items";
     try {
-      const partsRef = collection(db, "spare_parts");
+      const partsRef = collection(db, "products", "listings", "items");
       const q = query(partsRef, orderBy("createdAt", "desc"));
       const snapshot = await getDocs(q);
       const parts: SparePart[] = [];
@@ -134,7 +199,10 @@ export async function fetchSpareParts(): Promise<SparePart[]> {
         parts.push({ id: docSnapshot.id, ...docSnapshot.data() } as SparePart);
       });
       return parts;
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === "permission-denied" || err?.message?.includes("permission")) {
+        handleFirestoreError(err, OperationType.GET, path);
+      }
       console.error("Firestore fetch error, falling back to LocalStorage", err);
     }
   }
@@ -150,19 +218,30 @@ export async function fetchSpareParts(): Promise<SparePart[]> {
 }
 
 export async function createSparePartListing(part: Omit<SparePart, "id" | "createdAt">): Promise<SparePart> {
+  const tempId = "part-" + Math.random().toString(36).substr(2, 9);
   const newPart: SparePart = {
     ...part,
-    id: useFirebase ? "" : "local-part-" + Math.random().toString(36).substr(2, 9),
+    id: useFirebase ? "" : "local-part-" + tempId,
     createdAt: Date.now()
   };
 
   if (useFirebase && db) {
+    const path = "products/listings/items";
     try {
-      const partsRef = collection(db, "spare_parts");
+      let finalImageUrl = newPart.imageUrl;
+      if (newPart.imageUrl && newPart.imageUrl.startsWith("data:image/")) {
+        finalImageUrl = await uploadProductImage(newPart.imageUrl, tempId);
+      }
+      newPart.imageUrl = finalImageUrl;
+
+      const partsRef = collection(db, "products", "listings", "items");
       const docRef = await addDoc(partsRef, newPart);
       newPart.id = docRef.id;
       return newPart;
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === "permission-denied" || err?.message?.includes("permission")) {
+        handleFirestoreError(err, OperationType.WRITE, path);
+      }
       console.error("Firestore save error, saving to LocalStorage fallback:", err);
     }
   }
@@ -171,7 +250,7 @@ export async function createSparePartListing(part: Omit<SparePart, "id" | "creat
   const localData = localStorage.getItem(LOCAL_STORAGE_PARTS_KEY);
   const partsList: SparePart[] = localData ? JSON.parse(localData) : [];
   if (!newPart.id) {
-    newPart.id = "local-part-" + Math.random().toString(36).substr(2, 9);
+    newPart.id = "local-part-" + tempId;
   }
   partsList.unshift(newPart);
   localStorage.setItem(LOCAL_STORAGE_PARTS_KEY, JSON.stringify(partsList));
@@ -180,11 +259,15 @@ export async function createSparePartListing(part: Omit<SparePart, "id" | "creat
 
 export async function deleteSparePartListing(partId: string): Promise<boolean> {
   if (useFirebase && db && !partId.startsWith("local-part-")) {
+    const path = `products/listings/items/${partId}`;
     try {
-      const docRef = doc(db, "spare_parts", partId);
+      const docRef = doc(db, "products", "listings", "items", partId);
       await deleteDoc(docRef);
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === "permission-denied" || err?.message?.includes("permission")) {
+        handleFirestoreError(err, OperationType.DELETE, path);
+      }
       console.error("Firestore delete error, falling back to LocalStorage delete:", err);
     }
   }
@@ -202,11 +285,15 @@ export async function deleteSparePartListing(partId: string): Promise<boolean> {
 
 export async function updateSparePartListing(partId: string, updates: Partial<SparePart>): Promise<boolean> {
   if (useFirebase && db && !partId.startsWith("local-part-")) {
+    const path = `products/listings/items/${partId}`;
     try {
-      const docRef = doc(db, "spare_parts", partId);
+      const docRef = doc(db, "products", "listings", "items", partId);
       await updateDoc(docRef, updates);
       return true;
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === "permission-denied" || err?.message?.includes("permission")) {
+        handleFirestoreError(err, OperationType.UPDATE, path);
+      }
       console.error("Firestore update error, falling back to LocalStorage:", err);
     }
   }
