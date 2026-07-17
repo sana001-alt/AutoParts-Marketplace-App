@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud_firestore {
+  match /databases/{database}/documents {
+    
+    // Helper to check if a user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    // Helper to check if a user matches their document ID
+    function isOwner(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
+    // Users Collection rules
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow write: if isOwner(userId);
+    }
+
+    // Parts Collection rules
+    match /spare_parts/{partId} {
+      allow read: if true; // Public marketplace listings
+      allow create: if isAuth() && request.resource.data.sellerId == request.auth.uid;
+      allow update, delete: if isAuth() && resource.data.sellerId == request.auth.uid;
+    }
+
+    // Chats Collection rules
+    match /chats/{chatId} {
+      // Allow read if the authenticated user is either the buyer or the seller
+      allow read: if isAuth() && (
+        resource.data.buyerId == request.auth.uid || 
+        resource.data.sellerId == request.auth.uid
+      );
+      
+      // Allow create if the authenticated user is the buyer or seller
+      allow create: if isAuth() && (
+        request.resource.data.buyerId == request.auth.uid || 
+        request.resource.data.sellerId == request.auth.uid
+      );
+      
+      // Allow update if the user is a participant
+      allow update: if isAuth() && (
+        resource.data.buyerId == request.auth.uid || 
+        resource.data.sellerId == request.auth.uid
+      );
+      
+      // Subcollection of messages inside a chat room
+      match /messages/{messageId} {
+        // Can read messages if the user is either the buyer or seller of the parent chat
+        allow read: if isAuth() && (
+          get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid
+        );
+        
+        // Can write messages if the user is either the buyer or seller of the parent chat AND the sender matches request.auth.uid
+        allow create: if isAuth() && (
+          get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid
+        ) && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+  }
+}
