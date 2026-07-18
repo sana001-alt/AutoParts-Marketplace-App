@@ -15,10 +15,11 @@ import {
   Car,
   Layers,
   UploadCloud,
-  Check
+  Check,
+  X
 } from "lucide-react";
 import { User, SparePart, INDIAN_CAR_BRANDS, CAR_PART_CATEGORIES, CAR_SPARE_PARTS_BY_CATEGORY, POPULAR_LOCATIONS } from "../types";
-import { createSparePartListing } from "../lib/firebase";
+import { createSparePartListing, uploadProductImage } from "../lib/firebase";
 import { INDIAN_STATES_AND_DISTRICTS } from "../data/indianLocations";
 import MapLocationModal from "./MapLocationModal";
 import { useLanguage } from "../lib/LanguageContext";
@@ -53,7 +54,8 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
   const [selectedDistrict, setSelectedDistrict] = useState("");
   const [contactName, setContactName] = useState(currentUser.name || "");
   const [contactPhone, setContactPhone] = useState(currentUser.phone || "");
-  const [imageUrl, setImageUrl] = useState("");
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   
   // Coordinates State
   const [lat, setLat] = useState<number | undefined>(undefined);
@@ -103,24 +105,49 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
     updateAutoTitle(carBrand, carModel, part);
   };
 
-  // Handle local image file upload (convert to Base64)
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Handle multiple local image files upload (upload each directly to Cloudinary)
+  const handleImageFilesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (uploadedImages.length + files.length > 20) {
+      setError("You can upload up to 20 images per listing.");
+      return;
+    }
 
     setIsUploading(true);
     setError(null);
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setImageUrl(reader.result as string);
+    const uploadPromises = Array.from(files).map((file: any, idx) => {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          try {
+            setUploadProgress(`Uploading image ${idx + 1}/${files.length}...`);
+            const cloudinaryUrl = await uploadProductImage(reader.result as string);
+            resolve(cloudinaryUrl);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = () => reject(new Error("Failed to read local file."));
+        reader.readAsDataURL(file);
+      });
+    });
+
+    try {
+      const urls = await Promise.all(uploadPromises);
+      setUploadedImages(prev => [...prev, ...urls]);
+    } catch (err: any) {
+      setError(err.message || "Failed to upload one or more images. Please try again.");
+    } finally {
       setIsUploading(false);
-    };
-    reader.onerror = () => {
-      setError("Failed to load local file. Try copy pasting an image web address instead.");
-      setIsUploading(false);
-    };
-    reader.readAsDataURL(file);
+      setUploadProgress(null);
+    }
+  };
+
+  const handleRemoveImage = (indexToRemove: number) => {
+    setUploadedImages(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   const handlePublish = async (e: React.FormEvent) => {
@@ -139,7 +166,7 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
     }
 
     // Default image if none provided
-    const listingImage = imageUrl || "https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&q=80&w=600";
+    const primaryImage = uploadedImages[0] || "https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&q=80&w=600";
 
     setIsUploading(true);
 
@@ -160,7 +187,8 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
         lng,
         contactName,
         contactPhone,
-        imageUrl: listingImage,
+        imageUrl: primaryImage,
+        imageUrls: uploadedImages.length > 0 ? uploadedImages : [primaryImage],
         sellerId: currentUser.id,
         sellerEmail: currentUser.email
       });
@@ -192,7 +220,8 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
     setSelectedDistrict("");
     setLat(undefined);
     setLng(undefined);
-    setImageUrl("");
+    setUploadedImages([]);
+    setUploadProgress(null);
     setShowSuccess(false);
     setError(null);
   };
@@ -237,35 +266,95 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
             Spare Part Photos
           </label>
 
-          {imageUrl ? (
-            <div className="h-44 w-full rounded-xl bg-slate-100 border border-slate-200 overflow-hidden relative group">
-              <img
-                src={imageUrl}
-                alt="Upload preview"
-                className="w-full h-full object-cover"
-              />
-              <button
-                type="button"
-                onClick={() => setImageUrl("")}
-                className="absolute top-2.5 right-2.5 bg-slate-900/60 hover:bg-slate-900 text-white text-[10px] font-bold py-1 px-2.5 rounded-full backdrop-blur-md transition-colors"
-                id="remove-image-btn"
-              >
-                Clear Photo
-              </button>
+          {uploadProgress && (
+            <div className="text-[10px] text-indigo-600 font-semibold bg-indigo-50/50 p-2 rounded-lg border border-indigo-100/50 flex items-center gap-1.5 animate-pulse">
+              <span className="h-1.5 w-1.5 bg-indigo-600 rounded-full animate-ping"></span>
+              {uploadProgress}
+            </div>
+          )}
+
+          {uploadedImages.length > 0 ? (
+            <div className="space-y-3">
+              {/* Primary Image Cover Preview */}
+              <div className="h-44 w-full rounded-xl bg-slate-100 border border-slate-200 overflow-hidden relative group">
+                <img
+                  src={uploadedImages[0]}
+                  alt="Primary listing preview"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute top-2.5 left-2.5 bg-slate-900/70 text-white text-[9px] font-extrabold uppercase tracking-wider py-1 px-2 rounded-md backdrop-blur-md">
+                  Cover Photo
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveImage(0)}
+                  className="absolute top-2.5 right-2.5 bg-rose-600/90 hover:bg-rose-600 text-white text-[10px] font-bold py-1 px-2.5 rounded-full backdrop-blur-md transition-colors"
+                  id="remove-primary-image-btn"
+                >
+                  Remove
+                </button>
+              </div>
+
+              {/* Thumbnails Grid for multi-upload */}
+              {uploadedImages.length > 1 && (
+                <div className="grid grid-cols-5 gap-2 pt-1">
+                  {uploadedImages.slice(1).map((imgUrl, index) => (
+                    <div key={index} className="aspect-square rounded-lg bg-slate-100 border border-slate-200 overflow-hidden relative group">
+                      <img
+                        src={imgUrl}
+                        alt={`Preview ${index + 2}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(index + 1)}
+                        className="absolute top-1 right-1 bg-slate-900/80 hover:bg-rose-600 text-white rounded-full p-0.5 transition-colors"
+                        id={`remove-image-btn-${index + 1}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Upload trigger if under 20 images */}
+              {uploadedImages.length < 20 && (
+                <div className="flex justify-between items-center bg-slate-50 border border-slate-200 rounded-xl p-3">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-700">Add More Photos</span>
+                    <span className="text-[10px] text-slate-400">{uploadedImages.length}/20 uploaded</span>
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleImageFilesChange}
+                    className="hidden"
+                    id="add-more-image-file-picker"
+                  />
+                  <label
+                    htmlFor="add-more-image-file-picker"
+                    className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-semibold hover:bg-slate-50 cursor-pointer shadow-sm"
+                  >
+                    Choose Files
+                  </label>
+                </div>
+              )}
             </div>
           ) : (
             <div className="border-2 border-dashed border-slate-200 rounded-2xl p-5 flex flex-col items-center justify-center text-center hover:border-indigo-400 transition-colors bg-slate-50/50">
               <UploadCloud size={32} className="text-slate-400 mb-2" />
-              <p className="text-xs font-bold text-slate-700">Browse or Drag Part Photo</p>
+              <p className="text-xs font-bold text-slate-700">Browse or Drag Part Photos</p>
               <p className="text-[10px] text-slate-400 mt-1 max-w-[200px]">
-                Support local file upload, copy pasting image URL, or selecting sample below.
+                Support local file uploads (up to 20 images), copy pasting image URLs, or selecting samples below.
               </p>
               
-              {/* Native file upload input */}
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleImageFileChange}
+                multiple
+                onChange={handleImageFilesChange}
                 className="hidden"
                 id="image-file-picker"
               />
@@ -274,13 +363,13 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
                 className="mt-3 px-4 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-semibold hover:bg-slate-50 cursor-pointer shadow-sm active:scale-95 transition-all"
                 id="btn-upload-file"
               >
-                Choose Local File
+                Choose Local Files
               </label>
             </div>
           )}
 
           {/* Quick presets helper */}
-          {!imageUrl && (
+          {uploadedImages.length < 20 && (
             <div className="pt-2">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
                 Or Quick Choose Sample Image:
@@ -290,7 +379,13 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
                   <button
                     key={img.label}
                     type="button"
-                    onClick={() => setImageUrl(img.url)}
+                    onClick={() => {
+                      if (uploadedImages.length >= 20) {
+                        setError("You can upload up to 20 images per listing.");
+                        return;
+                      }
+                      setUploadedImages(prev => [...prev, img.url]);
+                    }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] font-semibold transition-colors shrink-0"
                     id={`image-preset-${img.label.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
                   >
@@ -306,11 +401,24 @@ export default function SellScreen({ currentUser, onPublishSuccess }: SellScreen
           <div className="pt-1.5 relative">
             <input
               type="text"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="Paste custom Image URL (optional)"
+              placeholder="Paste custom Image URL and press Enter (optional)"
               className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-sky-500"
               id="image-url-input"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const target = e.target as HTMLInputElement;
+                  const val = target.value.trim();
+                  if (val) {
+                    if (uploadedImages.length >= 20) {
+                      setError("You can upload up to 20 images per listing.");
+                      return;
+                    }
+                    setUploadedImages(prev => [...prev, val]);
+                    target.value = "";
+                  }
+                }
+              }}
             />
           </div>
         </div>

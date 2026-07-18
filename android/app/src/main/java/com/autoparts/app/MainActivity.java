@@ -1,4 +1,4 @@
-package com.autoparts.marketplace;
+package com.autoparts.app;
 
 import com.getcapacitor.BridgeActivity;
 

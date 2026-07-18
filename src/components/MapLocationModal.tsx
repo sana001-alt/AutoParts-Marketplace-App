@@ -24,30 +24,46 @@ export default function MapLocationModal({
   const [hasSelected, setHasSelected] = useState<boolean>(
     Boolean(initialLat && initialLng && initialLat !== 0 && initialLng !== 0)
   );
+  const [error, setError] = useState<string | null>(null);
 
   const handleLocationSelect = (lat: number, lng: number) => {
     setSelectedLat(lat);
     setSelectedLng(lng);
     setHasSelected(true);
+    setError(null);
   };
 
   const handleUseCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = parseFloat(position.coords.latitude.toFixed(6));
-          const lng = parseFloat(position.coords.longitude.toFixed(6));
-          setSelectedLat(lat);
-          setSelectedLng(lng);
-          setHasSelected(true);
-        },
-        (error) => {
-          console.error("Error getting geolocation", error);
-          alert("Could not retrieve GPS location. You can still manually drop a pin on the map!");
-        }
-      );
-    } else {
-      alert("Geolocation is not supported by your browser.");
+    setError(null);
+
+    // Detect iframe preview mode
+    const isIframe = typeof window !== "undefined" && window.self !== window.top;
+    if (isIframe) {
+      setError("Current location is unavailable in Preview. Please test on a real device.");
+      return;
+    }
+
+    try {
+      if (navigator && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const lat = parseFloat(position.coords.latitude.toFixed(6));
+            const lng = parseFloat(position.coords.longitude.toFixed(6));
+            setSelectedLat(lat);
+            setSelectedLng(lng);
+            setHasSelected(true);
+          },
+          (err) => {
+            console.error("Error getting geolocation", err);
+            setError("Current location is unavailable in Preview. Please test on a real device.");
+          }
+        );
+      } else {
+        setError("Geolocation is not supported by your browser.");
+      }
+    } catch (e) {
+      console.error("Exception checking geolocation", e);
+      setError("Current location is unavailable in Preview. Please test on a real device.");
     }
   };
 
@@ -98,6 +114,11 @@ export default function MapLocationModal({
 
           {/* Location details and GPS controls */}
           <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+            {error && (
+              <div className="p-2.5 bg-rose-500/10 border border-rose-500/25 rounded-xl text-[10px] text-rose-400 font-medium leading-relaxed">
+                {error}
+              </div>
+            )}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-slate-300 font-mono text-[10px]">
                 <Compass size={13} className="text-indigo-400 animate-spin-slow" />

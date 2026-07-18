@@ -1,11 +1,13 @@
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { 
   getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
   signOut as firebaseSignOut,
   onAuthStateChanged,
   User as FirebaseUser,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   sendPasswordResetEmail
 } from "firebase/auth";
 import { 
@@ -23,25 +25,22 @@ import {
   updateDoc,
   onSnapshot
 } from "firebase/firestore";
-import { 
-  getStorage, 
-  ref, 
-  uploadString, 
-  getDownloadURL 
-} from "firebase/storage";
 import { SparePart, User, Chat, Message, SellerReview } from "../types";
 import { INITIAL_SPARE_PARTS, INITIAL_SELLER_REVIEWS } from "../data/mockData";
+import firebaseAppletConfig from "../../firebase-applet-config.json";
 
 const metaEnv = (import.meta as any).env || {};
 
-// Look for Firebase config in localStorage first (for dynamic user customization), then fall back to environment variables
+const configFromFile = (firebaseAppletConfig || {}) as any;
+
+// Look for Firebase config in environment variables first, then firebase-applet-config.json file
 const firebaseConfig = {
-  apiKey: localStorage.getItem("firebase_config_apiKey") || metaEnv.VITE_FIREBASE_API_KEY || "",
-  authDomain: localStorage.getItem("firebase_config_authDomain") || metaEnv.VITE_FIREBASE_AUTH_DOMAIN || "",
-  projectId: localStorage.getItem("firebase_config_projectId") || metaEnv.VITE_FIREBASE_PROJECT_ID || "",
-  storageBucket: localStorage.getItem("firebase_config_storageBucket") || metaEnv.VITE_FIREBASE_STORAGE_BUCKET || "",
-  messagingSenderId: localStorage.getItem("firebase_config_messagingSenderId") || metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-  appId: localStorage.getItem("firebase_config_appId") || metaEnv.VITE_FIREBASE_APP_ID || ""
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || configFromFile.apiKey || "",
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || configFromFile.authDomain || "",
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || configFromFile.projectId || "",
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || configFromFile.storageBucket || "",
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || configFromFile.messagingSenderId || "",
+  appId: metaEnv.VITE_FIREBASE_APP_ID || configFromFile.appId || ""
 };
 
 // Determine if configuration is valid and fully provided
@@ -53,7 +52,6 @@ const isFirebaseConfigured = !!(
 let app: any = null;
 let auth: any = null;
 let db: any = null;
-let storage: any = null;
 let useFirebase = false;
 
 if (isFirebaseConfigured) {
@@ -61,7 +59,6 @@ if (isFirebaseConfigured) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     db = getFirestore(app);
-    storage = getStorage(app);
     useFirebase = true;
     console.log("Firebase initialized successfully with configuration:", firebaseConfig.projectId);
   } catch (error) {
@@ -70,43 +67,6 @@ if (isFirebaseConfigured) {
   }
 } else {
   console.log("Firebase config not found or incomplete. Falling back to LocalStorage mode.");
-}
-
-// Helpers for dynamic configuration management
-export function saveDynamicFirebaseConfig(config: {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-}) {
-  localStorage.setItem("firebase_config_apiKey", config.apiKey);
-  localStorage.setItem("firebase_config_authDomain", config.authDomain);
-  localStorage.setItem("firebase_config_projectId", config.projectId);
-  localStorage.setItem("firebase_config_storageBucket", config.storageBucket);
-  localStorage.setItem("firebase_config_messagingSenderId", config.messagingSenderId);
-  localStorage.setItem("firebase_config_appId", config.appId);
-}
-
-export function clearDynamicFirebaseConfig() {
-  localStorage.removeItem("firebase_config_apiKey");
-  localStorage.removeItem("firebase_config_authDomain");
-  localStorage.removeItem("firebase_config_projectId");
-  localStorage.removeItem("firebase_config_storageBucket");
-  localStorage.removeItem("firebase_config_messagingSenderId");
-  localStorage.removeItem("firebase_config_appId");
-}
-
-export function getDynamicFirebaseConfig() {
-  return {
-    apiKey: localStorage.getItem("firebase_config_apiKey") || "",
-    authDomain: localStorage.getItem("firebase_config_authDomain") || "",
-    projectId: localStorage.getItem("firebase_config_projectId") || "",
-    storageBucket: localStorage.getItem("firebase_config_storageBucket") || "",
-    messagingSenderId: localStorage.getItem("firebase_config_messagingSenderId") || "",
-    appId: localStorage.getItem("firebase_config_appId") || ""
-  };
 }
 
 // Ensure local storage has initial spare parts if empty
@@ -157,30 +117,33 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  // Log the error but do not throw, allowing the caller functions to fall back to LocalStorage gracefully.
 }
 
-export async function uploadProductImage(base64Data: string, partId: string): Promise<string> {
-  if (useFirebase && storage) {
-    try {
-      let cleanData = base64Data;
-      const formatMatch = base64Data.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
-      if (formatMatch) {
-        cleanData = base64Data.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
-      }
-      
-      const storageRef = ref(storage, `products/listings/${partId}/image_${Date.now()}.jpg`);
-      await uploadString(storageRef, cleanData, "base64", {
-        contentType: "image/jpeg"
-      });
-      const downloadUrl = await getDownloadURL(storageRef);
-      console.log("Image uploaded successfully to Firebase Storage:", downloadUrl);
-      return downloadUrl;
-    } catch (error) {
-      console.error("Firebase Storage upload failed, using fallback base64 string:", error);
+export async function uploadProductImage(base64Data: string, partId?: string): Promise<string> {
+  try {
+    const url = "https://api.cloudinary.com/v1_1/rqf1hlrx/image/upload";
+    const formData = new FormData();
+    formData.append("file", base64Data);
+    formData.append("upload_preset", "autoparts_upload");
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Cloudinary upload failed: ${errText}`);
     }
+
+    const data = await response.json();
+    console.log("Image uploaded successfully to Cloudinary:", data.secure_url);
+    return data.secure_url;
+  } catch (error) {
+    console.error("Cloudinary upload failed, using fallback string:", error);
+    return base64Data;
   }
-  return base64Data;
 }
 
 export function isUsingFirebase(): boolean {
@@ -330,6 +293,20 @@ export function subscribeToAuth(callback: (user: User | null) => void): () => vo
           name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
           phone: firebaseUser.phoneNumber || undefined,
         };
+        
+        try {
+          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            u.name = data.name || u.name;
+            u.phone = data.phone || u.phone;
+            u.state = data.state || u.state;
+            u.district = data.district || u.district;
+          }
+        } catch (e) {
+          console.error("Failed to load user profile from Firestore:", e);
+        }
+        
         callback(u);
       } else {
         callback(null);
@@ -337,134 +314,167 @@ export function subscribeToAuth(callback: (user: User | null) => void): () => vo
     });
   }
 
-  // LocalStorage session listener (simplified for single-page SPA app state changes)
-  const checkLocalSession = () => {
-    const session = localStorage.getItem(LOCAL_STORAGE_CURRENT_USER_KEY);
-    if (session) {
-      callback(JSON.parse(session));
-    } else {
-      callback(null);
-    }
-  };
-
-  // Run immediately
-  checkLocalSession();
-
-  // Listen to storage events to keep in sync across simulator states
-  window.addEventListener("storage", checkLocalSession);
-  return () => {
-    window.removeEventListener("storage", checkLocalSession);
-  };
+  callback(null);
+  return () => {};
 }
 
-export async function loginWithEmail(email: string, password: string): Promise<User> {
-  if (useFirebase && auth) {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-    const u: User = {
-      id: cred.user.uid,
-      email: cred.user.email || "",
-      name: cred.user.displayName || email.split("@")[0],
-    };
-    return u;
-  }
-
-  // LocalStorage mock login
-  const usersRaw = localStorage.getItem(LOCAL_STORAGE_USERS_KEY);
-  const usersList: any[] = usersRaw ? JSON.parse(usersRaw) : [];
-  const foundUser = usersList.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-
-  if (foundUser) {
-    const u: User = {
-      id: foundUser.id,
-      email: foundUser.email,
-      name: foundUser.name,
-      phone: foundUser.phone,
-    };
-    localStorage.setItem(LOCAL_STORAGE_CURRENT_USER_KEY, JSON.stringify(u));
-    // Trigger storage event manually to notify components
-    window.dispatchEvent(new Event("storage"));
-    return u;
-  } else {
-    // If running in sandbox and no user found, let's auto-create a user on login for premium smooth onboarding,
-    // or return error. Let's return error if they typed wrong password for an existing, or create if it is a new email.
-    const emailExists = usersList.some(u => u.email.toLowerCase() === email.toLowerCase());
-    if (emailExists) {
-      throw new Error("Invalid email or password. Please try again.");
-    } else {
-      // Auto-register user for quick development preview
-      return registerWithEmail(email, password, email.split("@")[0], "+91 98765 00000");
+export async function updateUserProfile(userId: string, profile: Partial<User>): Promise<void> {
+  if (useFirebase && db) {
+    try {
+      const userDocRef = doc(db, "users", userId);
+      await setDoc(userDocRef, {
+        ...profile,
+        id: userId,
+        updatedAt: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.error("Failed to update user profile in Firestore:", e);
     }
   }
 }
 
-export async function registerWithEmail(email: string, password: string, name: string, phone: string): Promise<User> {
+export function createRecaptchaVerifier(elementId: string): any {
   if (useFirebase && auth) {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    const u: User = {
-      id: cred.user.uid,
-      email: cred.user.email || "",
-      name: name,
-      phone: phone,
-    };
-    return u;
+    try {
+      return new RecaptchaVerifier(auth, elementId, {
+        size: "invisible",
+        callback: () => {
+          console.log("reCAPTCHA solved successfully");
+        }
+      });
+    } catch (e) {
+      console.error("Failed to create RecaptchaVerifier:", e);
+      return null;
+    }
   }
+  return null;
+}
 
-  // LocalStorage mock registration
-  const usersRaw = localStorage.getItem(LOCAL_STORAGE_USERS_KEY);
-  const usersList: any[] = usersRaw ? JSON.parse(usersRaw) : [];
-
-  const emailExists = usersList.some(u => u.email.toLowerCase() === email.toLowerCase());
-  if (emailExists) {
-    throw new Error("Email address already registered.");
+export async function sendOtp(phoneNumber: string, appVerifier: any): Promise<any> {
+  if (useFirebase && auth) {
+    return await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
   }
+  throw new Error("Authentication service is not initialized.");
+}
 
-  const newUser = {
-    id: "local-user-" + Math.random().toString(36).substr(2, 9),
-    email,
-    password,
-    name,
-    phone,
-    createdAt: new Date().toISOString()
-  };
-
-  usersList.push(newUser);
-  localStorage.setItem(LOCAL_STORAGE_USERS_KEY, JSON.stringify(usersList));
+export async function verifyOtp(confirmationResult: any, otpCode: string): Promise<User> {
+  if (!confirmationResult || typeof confirmationResult.confirm !== "function") {
+    throw new Error("Verification session has expired or is invalid. Please request a new OTP code.");
+  }
+  const credential = await confirmationResult.confirm(otpCode);
+  const firebaseUser = credential.user;
 
   const u: User = {
-    id: newUser.id,
-    email: newUser.email,
-    name: newUser.name,
-    phone: newUser.phone,
+    id: firebaseUser.uid,
+    phone: firebaseUser.phoneNumber || "",
+    name: firebaseUser.displayName || "User " + (firebaseUser.phoneNumber || "").slice(-4),
+    email: firebaseUser.email || "",
   };
-  localStorage.setItem(LOCAL_STORAGE_CURRENT_USER_KEY, JSON.stringify(u));
-  window.dispatchEvent(new Event("storage"));
+
+  if (db) {
+    try {
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userDoc = await getDoc(userDocRef);
+      if (!userDoc.exists()) {
+        await setDoc(userDocRef, {
+          id: firebaseUser.uid,
+          name: u.name,
+          phone: u.phone,
+          email: u.email,
+          createdAt: Date.now()
+        });
+      } else {
+        const data = userDoc.data();
+        u.name = data.name || u.name;
+        u.email = data.email || u.email;
+        u.phone = data.phone || u.phone;
+        u.state = data.state || u.state;
+        u.district = data.district || u.district;
+      }
+    } catch (e) {
+      console.error("Failed to check or create user document in Firestore:", e);
+    }
+  }
+
   return u;
 }
 
 export async function signOut(): Promise<void> {
-  if (useFirebase && auth) {
+  if (auth) {
     await firebaseSignOut(auth);
-    return;
+  } else {
+    throw new Error("Authentication service is not available.");
   }
-
-  localStorage.removeItem(LOCAL_STORAGE_CURRENT_USER_KEY);
-  window.dispatchEvent(new Event("storage"));
 }
 
-export async function sendPasswordReset(email: string): Promise<void> {
-  if (useFirebase && auth) {
-    await sendPasswordResetEmail(auth, email);
+export async function signUpWithEmail(email: string, password: string, name: string, phone?: string): Promise<User> {
+  if (auth) {
+    const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    const firebaseUser = credential.user;
+    
+    const u: User = {
+      id: firebaseUser.uid,
+      email: firebaseUser.email || email.trim(),
+      name: name.trim() || email.split("@")[0],
+      phone: phone?.trim() || undefined,
+    };
+
+    if (db) {
+      try {
+        const userDocRef = doc(db, "users", firebaseUser.uid);
+        await setDoc(userDocRef, {
+          id: firebaseUser.uid,
+          name: u.name,
+          email: u.email,
+          phone: u.phone,
+          createdAt: Date.now()
+        });
+      } catch (e) {
+        console.error("Failed to create user profile in Firestore:", e);
+      }
+    }
+    return u;
+  }
+  throw new Error("Authentication service is not initialized.");
+}
+
+export async function signInWithEmail(email: string, password: string): Promise<User> {
+  if (auth) {
+    const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+    const firebaseUser = credential.user;
+
+    const u: User = {
+      id: firebaseUser.uid,
+      email: firebaseUser.email || email.trim(),
+      name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+      phone: firebaseUser.phoneNumber || undefined,
+    };
+
+    if (db) {
+      try {
+        const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          u.name = data.name || u.name;
+          u.phone = data.phone || u.phone;
+          u.state = data.state || u.state;
+          u.district = data.district || u.district;
+        }
+      } catch (e) {
+        console.error("Failed to fetch user profile from Firestore on login:", e);
+      }
+    }
+    return u;
+  }
+  throw new Error("Authentication service is not initialized.");
+}
+
+export async function resetPassword(email: string): Promise<void> {
+  if (auth) {
+    await sendPasswordResetEmail(auth, email.trim());
     return;
   }
-
-  // LocalStorage mock check
-  const usersRaw = localStorage.getItem(LOCAL_STORAGE_USERS_KEY);
-  const usersList: any[] = usersRaw ? JSON.parse(usersRaw) : [];
-  const foundUser = usersList.find(u => u.email.toLowerCase() === email.toLowerCase());
-  
-  if (!foundUser && email.toLowerCase() !== "buyer@demo.com" && email.toLowerCase() !== "arun@reclassic.com") {
-    throw new Error("We couldn't find an account associated with that email address.");
-  }
+  throw new Error("Authentication service is not initialized.");
 }
 
 // ----------------------------------------------------

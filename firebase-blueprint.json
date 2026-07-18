@@ -69,6 +69,23 @@
         "createdAt": { "type": "integer" }
       },
       "required": ["senderId", "text", "createdAt"]
+    },
+    "SellerReview": {
+      "title": "SellerReview",
+      "description": "Represents a rating and review submitted for a seller by a buyer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "buyerId": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "rating": { "type": "integer" },
+        "comment": { "type": "string" },
+        "partId": { "type": "string" },
+        "partTitle": { "type": "string" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["id", "sellerId", "buyerId", "buyerName", "rating", "comment", "createdAt"]
     }
   },
   "firestore": {
@@ -87,6 +104,10 @@
     "chats/{chatId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/Message" },
       "description": "Individual messages inside a chat room"
+    },
+    "seller_reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/SellerReview" },
+      "description": "Ratings and written reviews for marketplace sellers"
     }
   }
 }

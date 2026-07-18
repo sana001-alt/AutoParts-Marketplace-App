@@ -4,8 +4,7 @@ import { MapPin, Compass, HelpCircle, Copy, Check, Sliders } from "lucide-react"
 import { getApproxCoordinates, LatLng } from "../utils/locationHelper";
 
 const API_KEY =
-  process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
+  import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
   (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
   "";
 

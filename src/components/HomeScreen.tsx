@@ -12,6 +12,7 @@ import {
   Tag, 
   ChevronRight, 
   ChevronLeft,
+  ChevronDown,
   Sparkles,
   Info,
   Layers,
@@ -19,7 +20,9 @@ import {
   SlidersHorizontal,
   Plus,
   Maximize2,
-  Star
+  Star,
+  ArrowLeft,
+  Share2
 } from "lucide-react";
 import { SparePart, INDIAN_CAR_BRANDS, CAR_PART_CATEGORIES, CAR_SPARE_PARTS_BY_CATEGORY, POPULAR_LOCATIONS, User } from "../types";
 import { INDIAN_STATES_AND_DISTRICTS } from "../data/indianLocations";
@@ -30,6 +33,7 @@ import SellerReviewsView from "./SellerReviewsView";
 import { useLanguage } from "../lib/LanguageContext";
 import { translateDynamic } from "../lib/translations";
 import LanguageSelector from "./LanguageSelector";
+import GMap from "./GMap";
 
 // Fallback categories helper for cover swiping gallery consistency
 const getFallbackImages = (category: string): string[] => {
@@ -98,9 +102,15 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
   // Local state for toggling advanced filters drawer
   const [showFiltersModal, setShowFiltersModal] = useState(false);
 
+  // Home screen location selector state
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [locSearchQuery, setLocSearchQuery] = useState("");
+  const [locActiveState, setLocActiveState] = useState<string | null>(null);
+
   // Seller Rating & Reviews states
   const [sellerRating, setSellerRating] = useState<{ average: number; count: number } | null>(null);
   const [showReviews, setShowReviews] = useState(false);
+  const [showShareToast, setShowShareToast] = useState(false);
 
   React.useEffect(() => {
     const updateRating = () => {
@@ -128,18 +138,29 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
     };
   }, [selectedPart]);
 
-  // Flat list of all spare part names for suggestions and search
+  // Flat list of all spare part names, brands, and models for suggestions and search
   const ALL_SPARE_PART_NAMES = Object.values(CAR_SPARE_PARTS_BY_CATEGORY).flat();
+  const ALL_BRANDS = Object.keys(INDIAN_CAR_BRANDS);
+  const ALL_MODELS = Object.values(INDIAN_CAR_BRANDS).flat();
 
   // Search and Filter Logic
   const filteredParts = parts.filter((part) => {
-    const matchesSearch = 
-      part.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.carModel.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.carBrand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (part.partName && part.partName.toLowerCase().includes(searchQuery.toLowerCase()));
+    const title = (part.title || "").toLowerCase();
+    const description = (part.description || "").toLowerCase();
+    const carModel = (part.carModel || "").toLowerCase();
+    const carBrand = (part.carBrand || "").toLowerCase();
+    const category = (part.category || "").toLowerCase();
+    const partName = (part.partName || "").toLowerCase();
+    const query = (searchQuery || "").trim().toLowerCase();
+
+    const matchesSearch = !query ? true : (
+      title.includes(query) ||
+      description.includes(query) ||
+      carModel.includes(query) ||
+      carBrand.includes(query) ||
+      category.includes(query) ||
+      partName.includes(query)
+    );
     
     const matchesBrand = 
       selectedBrand === "All Brands" || 
@@ -179,9 +200,31 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
   });
 
   const trimmedQuery = searchQuery.trim().toLowerCase();
-  const suggestions = trimmedQuery 
-    ? ALL_SPARE_PART_NAMES.filter(name => name.toLowerCase().includes(trimmedQuery))
-    : [];
+  
+  const suggestions: { text: string; type: "Part Name" | "Brand" | "Model" }[] = [];
+  
+  if (trimmedQuery) {
+    // Match brands
+    ALL_BRANDS.forEach(brand => {
+      if (brand.toLowerCase().includes(trimmedQuery) && !suggestions.some(s => s.text === brand)) {
+        suggestions.push({ text: brand, type: "Brand" });
+      }
+    });
+    
+    // Match models
+    ALL_MODELS.forEach(model => {
+      if (model.toLowerCase().includes(trimmedQuery) && !suggestions.some(s => s.text === model)) {
+        suggestions.push({ text: model, type: "Model" });
+      }
+    });
+
+    // Match part names
+    ALL_SPARE_PART_NAMES.forEach(name => {
+      if (name.toLowerCase().includes(trimmedQuery) && !suggestions.some(s => s.text === name)) {
+        suggestions.push({ text: name, type: "Part Name" });
+      }
+    });
+  }
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("en-IN", {
@@ -230,43 +273,25 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
       <div className="bg-slate-900 text-white pt-5 pb-4 px-4 sticky top-0 z-10 shadow-md">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-none py-1">
-            <div className="flex items-center gap-1.5">
-              <MapPin size={14} className="text-sky-400 shrink-0" />
-              <select
-                value={selectedState}
-                onChange={(e) => {
-                  setSelectedState(e.target.value);
-                  setSelectedDistrict("All Districts"); // reset district
-                }}
-                className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer border-none"
-                id="header-state-picker"
-              >
-                <option value="All States" className="bg-slate-900 text-white">All India</option>
-                {INDIAN_STATES_AND_DISTRICTS.map((s) => (
-                  <option key={s.state} value={s.state} className="bg-slate-900 text-white text-xs">
-                    {s.state}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedState !== "All States" && (
-              <div className="flex items-center gap-1 border-l border-slate-800 pl-2">
-                <select
-                  value={selectedDistrict}
-                  onChange={(e) => setSelectedDistrict(e.target.value)}
-                  className="bg-transparent text-xs font-bold text-sky-300 focus:outline-none cursor-pointer border-none"
-                  id="header-district-picker"
-                >
-                  <option value="All Districts" className="bg-slate-900 text-white">All Districts</option>
-                  {(INDIAN_STATES_AND_DISTRICTS.find(s => s.state === selectedState)?.districts || []).map((d) => (
-                    <option key={d} value={d} className="bg-slate-900 text-white text-xs">
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <button
+              onClick={() => {
+                setLocSearchQuery("");
+                setLocActiveState(null);
+                setShowLocationModal(true);
+              }}
+              className="flex items-center gap-1.5 text-xs font-bold text-white focus:outline-none cursor-pointer bg-slate-850 hover:bg-slate-800 px-3 py-1.5 rounded-full transition-colors border border-slate-800/80"
+              id="header-location-picker-btn"
+            >
+              <MapPin size={13} className="text-sky-400 shrink-0" />
+              <span className="truncate max-w-[180px]" id="selected-location-text">
+                {selectedState === "All States" || selectedState === "All India"
+                  ? "All India"
+                  : selectedDistrict === "All Districts"
+                    ? `${selectedState} > All Districts`
+                    : `${selectedState} > ${selectedDistrict}`}
+              </span>
+              <ChevronDown size={11} className="text-slate-400 shrink-0 ml-0.5" />
+            </button>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <LanguageSelector />
@@ -319,13 +344,32 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                     key={index}
                     type="button"
                     onClick={() => {
-                      setSearchQuery(suggestion);
+                      setSearchQuery(suggestion.text);
                       setShowSuggestions(false);
+                      if (suggestion.type === "Brand") {
+                        handleBrandChange(suggestion.text);
+                      } else if (suggestion.type === "Model") {
+                        const brand = Object.keys(INDIAN_CAR_BRANDS).find(b => 
+                          INDIAN_CAR_BRANDS[b].includes(suggestion.text)
+                        );
+                        if (brand) {
+                          setSelectedBrand(brand);
+                          setSelectedModel(suggestion.text);
+                        }
+                      }
                     }}
                     className="w-full text-left px-4 py-2 text-xs text-slate-200 hover:bg-slate-800 transition-colors flex items-center justify-between"
                   >
-                    <span>{suggestion}</span>
-                    <span className="text-[9px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded font-mono">Part Name</span>
+                    <span>{suggestion.text}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
+                      suggestion.type === "Brand" 
+                        ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" 
+                        : suggestion.type === "Model" 
+                          ? "text-sky-400 bg-sky-500/10 border border-sky-500/20" 
+                          : "text-indigo-400 bg-indigo-500/10 border border-indigo-500/20"
+                    }`}>
+                      {suggestion.type}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -580,31 +624,91 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
       <AnimatePresence>
         {selectedPart && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setSelectedPart(null)}
-            className="absolute inset-0 bg-black/60 z-30 flex items-end"
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", damping: 26, stiffness: 220 }}
+            className="absolute inset-0 bg-slate-50 z-30 flex flex-col text-slate-900 overflow-hidden"
             id="part-detail-backdrop"
           >
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 220 }}
-              onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-t-[32px] w-full max-h-[80%] overflow-y-auto flex flex-col shadow-2xl relative text-slate-900"
-              id="part-detail-modal"
-            >
-              {/* Close handler */}
-              <button
-                onClick={() => setSelectedPart(null)}
-                className="absolute top-4 right-4 bg-white text-slate-900 p-2.5 rounded-full hover:bg-slate-100 shadow-xl border border-slate-200/80 hover:scale-105 active:scale-95 z-20 transition-all flex items-center justify-center cursor-pointer"
-                id="close-detail-btn"
-              >
-                <X size={18} strokeWidth={3} />
-              </button>
+            {/* Custom Toast Alert for sharing link */}
+            <AnimatePresence>
+              {showShareToast && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 10 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="absolute top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-full shadow-lg font-bold flex items-center gap-2 z-[99]"
+                >
+                  <Sparkles size={14} className="text-amber-400" />
+                  <span>Link copied to clipboard!</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
+            {/* Sticky Top Header Bar */}
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-3.5 py-2.5 flex items-center justify-between z-20 shadow-xs">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedPart(null)}
+                  className="p-1.5 hover:bg-slate-100 rounded-full transition-all active:scale-95 cursor-pointer text-slate-800"
+                  id="close-detail-btn"
+                >
+                  <ArrowLeft size={22} strokeWidth={2.5} />
+                </button>
+                <div className="flex flex-col">
+                  <span className="font-extrabold text-xs text-slate-900 tracking-wide uppercase">Ad Details</span>
+                  <span className="text-[10px] text-slate-400 font-bold font-mono">ID: {selectedPart.id.substring(0, 8).toUpperCase()}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Share Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const shareUrl = window.location.origin + "?part=" + selectedPart.id;
+                    if (navigator.share) {
+                      navigator.share({
+                        title: selectedPart.title,
+                        text: `Check out this ${selectedPart.carBrand} ${selectedPart.carModel} ${selectedPart.title} on Autoparts India!`,
+                        url: shareUrl
+                      }).catch(() => {
+                        navigator.clipboard.writeText(shareUrl);
+                        setShowShareToast(true);
+                        setTimeout(() => setShowShareToast(false), 2000);
+                      });
+                    } else {
+                      navigator.clipboard.writeText(shareUrl);
+                      setShowShareToast(true);
+                      setTimeout(() => setShowShareToast(false), 2000);
+                    }
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-95 text-slate-700 cursor-pointer"
+                  title="Share"
+                >
+                  <Share2 size={20} />
+                </button>
+
+                {/* Heart/Favorite Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onFavoriteToggle) onFavoriteToggle(selectedPart.id);
+                  }}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-95 cursor-pointer text-slate-700"
+                  title="Favorite"
+                >
+                  <Heart
+                    size={20}
+                    className={favorites.includes(selectedPart.id) ? "fill-red-500 text-red-500 stroke-red-500 animate-pulse" : "text-slate-700"}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto pb-24 scrollbar-none bg-slate-50">
               {/* Cover Image Carousel */}
               {(() => {
                 const imageList: string[] = [];
@@ -650,7 +754,7 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
 
                 return (
                   <div 
-                    className="h-64 w-full bg-slate-100 relative cursor-pointer group overflow-hidden select-none touch-pan-y"
+                    className="h-80 w-full bg-slate-950 relative cursor-pointer group overflow-hidden select-none touch-pan-y flex items-center justify-center border-b border-slate-200"
                     onTouchStart={handleTouchStartLocal}
                     onTouchEnd={handleTouchEndLocal}
                     onClick={() => setIsGalleryOpen(true)}
@@ -662,11 +766,11 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                         src={imageList[detailImageIndex] || selectedPart.imageUrl}
                         alt={selectedPart.title}
                         referrerPolicy="no-referrer"
-                        initial={{ opacity: 0.8, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0.8, x: -20 }}
+                        initial={{ opacity: 0.85, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0.85, scale: 0.98 }}
                         transition={{ duration: 0.2 }}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain max-h-80"
                       />
                     </AnimatePresence>
 
@@ -678,7 +782,7 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                             e.stopPropagation();
                             setDetailImageIndex(prev => (prev > 0 ? prev - 1 : imageList.length - 1));
                           }}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 hover:bg-indigo-600 text-white rounded-full transition-all z-20 cursor-pointer shadow-md border border-white/5 opacity-0 group-hover:opacity-100 md:opacity-80"
+                          className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/45 hover:bg-indigo-600 text-white rounded-full transition-all z-10 cursor-pointer shadow-md opacity-0 group-hover:opacity-100 md:opacity-80 flex items-center justify-center"
                         >
                           <ChevronLeft size={16} />
                         </button>
@@ -687,16 +791,16 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                             e.stopPropagation();
                             setDetailImageIndex(prev => (prev < imageList.length - 1 ? prev + 1 : 0));
                           }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 hover:bg-indigo-600 text-white rounded-full transition-all z-20 cursor-pointer shadow-md border border-white/5 opacity-0 group-hover:opacity-100 md:opacity-80"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/45 hover:bg-indigo-600 text-white rounded-full transition-all z-10 cursor-pointer shadow-md opacity-0 group-hover:opacity-100 md:opacity-80 flex items-center justify-center"
                         >
                           <ChevronRight size={16} />
                         </button>
                       </>
                     )}
 
-                    {/* Progress indicators dots */}
+                    {/* Progress indicators dots or pills */}
                     {imageList.length > 1 && (
-                      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
+                      <div className="absolute bottom-4 left-4 flex items-center gap-1.5 z-10">
                         {imageList.map((_, idx) => (
                           <button
                             key={idx}
@@ -705,60 +809,56 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                               setDetailImageIndex(idx);
                             }}
                             className={`h-1.5 rounded-full transition-all duration-300 ${
-                              idx === detailImageIndex ? "w-4 bg-indigo-500" : "w-1.5 bg-white/40"
+                              idx === detailImageIndex ? "w-4 bg-indigo-500" : "w-1.5 bg-white/45"
                             }`}
                           />
                         ))}
                       </div>
                     )}
 
-                    {/* Gallery hint badge */}
-                    <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-sm text-[9px] font-black tracking-wider text-white px-2.5 py-1.5 rounded-xl flex items-center gap-1 border border-white/10 opacity-90 group-hover:opacity-100 transition-all duration-300 z-10">
-                      <Maximize2 size={10} className="text-indigo-400" />
-                      VIEW GALLERY ({detailImageIndex + 1}/{imageList.length})
+                    {/* Image Counter Badge (OLX style) */}
+                    <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-xs text-[11px] font-bold text-white px-2.5 py-1 rounded-md tracking-wider font-mono z-10">
+                      {detailImageIndex + 1} / {imageList.length}
+                    </div>
+
+                    {/* Gallery hint badge (Top Left) */}
+                    <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-sm text-[10px] font-black tracking-wider text-white px-2.5 py-1.5 rounded-md flex items-center gap-1 border border-white/10 opacity-90 transition-all z-10">
+                      <Maximize2 size={10} className="text-indigo-400 animate-pulse" />
+                      VIEW FULLSCREEN
                     </div>
 
                     {selectedPart.sold && (
-                      <div className="absolute inset-0 bg-slate-950/65 flex items-center justify-center z-10 animate-fade-in">
-                        <span className="text-sm font-black tracking-widest text-white bg-rose-600 px-4 py-1.5 rounded-lg uppercase shadow-xl border border-rose-500">
+                      <div className="absolute inset-0 bg-slate-950/65 flex items-center justify-center z-20">
+                        <span className="text-xs font-black tracking-widest text-white bg-rose-600 px-4 py-2 rounded-md uppercase shadow-xl border border-rose-500">
                           SOLD OUT
                         </span>
                       </div>
                     )}
-
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-5 pt-10 text-white z-10 pointer-events-none">
-                      <div className="flex gap-1.5 flex-wrap mb-1.5 pointer-events-auto">
-                        <span className="inline-block px-2.5 py-0.5 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase tracking-wider">
-                          {selectedPart.carBrand}
-                        </span>
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border border-white/10 ${getConditionColor(selectedPart.condition)}`}>
-                          {selectedPart.condition}
-                        </span>
-                      </div>
-                      <h3 className="text-base font-black tracking-tight leading-snug">
-                        {selectedPart.title}
-                      </h3>
-                      <p className="text-xs text-slate-300 mt-1 font-medium">
-                        Fits models: <span className="font-extrabold text-white">{selectedPart.carBrand} {selectedPart.carModel}</span>
-                      </p>
-                    </div>
                   </div>
                 );
               })()}
-              {/* Body details */}
-              <div className="p-5 space-y-4">
-                {/* Price and date */}
-                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-extrabold tracking-wider block">{t("priceInIndia")}</span>
-                    <span className="text-2xl font-black text-slate-900 tracking-tight font-mono">
+
+              <div className="space-y-3 mt-3">
+                {/* Price, Title, Location details */}
+                <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-1.5">
+                  <div className="flex justify-between items-start">
+                    <span className="text-2xl font-black text-slate-900 tracking-tight font-sans">
                       {formatPrice(selectedPart.price)}
                     </span>
+                    <span className={`inline-block px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${getConditionColor(selectedPart.condition)}`}>
+                      {selectedPart.condition}
+                    </span>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 font-extrabold tracking-wider block">{t("posted")}</span>
-                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1 mt-1 justify-end">
-                      <Calendar size={12} className="text-slate-400" />
+                  <h3 className="text-sm font-semibold text-slate-800 leading-snug tracking-tight">
+                    {selectedPart.title}
+                  </h3>
+                  <div className="h-px bg-slate-100 my-2.5" />
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                    <span className="flex items-center gap-1 font-bold">
+                      <MapPin size={13} className="text-slate-400 shrink-0" />
+                      {selectedPart.district || selectedPart.location}, {selectedPart.state || "All India"}
+                    </span>
+                    <span>
                       {new Date(selectedPart.createdAt).toLocaleDateString("en-IN", {
                         day: "numeric",
                         month: "short"
@@ -767,110 +867,128 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                   </div>
                 </div>
 
-                {/* Description details */}
-                <div className="space-y-1.5">
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                    <Info size={12} />
-                    Item Description
+                {/* Key attributes/Specification grid */}
+                <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-3">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-l-3 border-indigo-600 pl-2">
+                    Details & Specifications
                   </h4>
-                  <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-1">
+                    <div className="flex flex-col border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">Brand</span>
+                      <span className="text-xs font-extrabold text-slate-800 mt-0.5">{selectedPart.carBrand}</span>
+                    </div>
+                    <div className="flex flex-col border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">Model Compatibility</span>
+                      <span className="text-xs font-extrabold text-slate-800 mt-0.5">{selectedPart.carModel}</span>
+                    </div>
+                    <div className="flex flex-col border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">Category</span>
+                      <span className="text-xs font-extrabold text-slate-800 mt-0.5">{selectedPart.category}</span>
+                    </div>
+                    <div className="flex flex-col border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">Condition</span>
+                      <span className="text-xs font-extrabold text-slate-800 mt-0.5">{selectedPart.condition}</span>
+                    </div>
+                    <div className="flex flex-col border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">State</span>
+                      <span className="text-xs font-extrabold text-slate-800 mt-0.5">{selectedPart.state || "All India"}</span>
+                    </div>
+                    <div className="flex flex-col border-b border-slate-100 pb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">District</span>
+                      <span className="text-xs font-extrabold text-slate-800 mt-0.5">{selectedPart.district || "All Districts"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Description block */}
+                <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-2">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-l-3 border-indigo-600 pl-2">
+                    Description
+                  </h4>
+                  <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line font-medium pt-1">
                     {selectedPart.description}
                   </p>
                 </div>
 
-                {/* Technical specs block */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-2.5">
-                    <span className="p-2 bg-indigo-50 text-indigo-500 rounded-xl">
-                      <Car size={15} />
-                    </span>
-                    <div className="min-w-0">
-                      <span className="text-[9px] text-slate-400 font-extrabold block leading-none uppercase">CATEGORY</span>
-                      <span className="text-xs font-black text-slate-800 block mt-1 truncate">{selectedPart.category}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-2.5">
-                    <span className="p-2 bg-sky-50 text-sky-500 rounded-xl">
-                      <MapPin size={15} />
-                    </span>
-                    <div className="min-w-0">
-                      <span className="text-[9px] text-slate-400 font-extrabold block leading-none uppercase">LOCATION</span>
-                      <span className="text-xs font-black text-slate-800 block mt-1 truncate">{selectedPart.location}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Contact Seller Panel */}
-                <div className="bg-slate-900 text-white rounded-3xl p-4 shadow-lg border border-slate-800">
-                  <div className="flex justify-between items-center mb-3">
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold block">VERIFIED SELLER</span>
-                      <h5 className="text-sm font-black text-white mt-0.5">{selectedPart.contactName}</h5>
-                      <span className="text-[10px] text-slate-400">{selectedPart.sellerEmail}</span>
-                      
-                      {/* Interactive Rating Button */}
-                      {sellerRating && (
-                        <button
-                          onClick={() => setShowReviews(true)}
-                          className="flex items-center gap-1 bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/25 px-2.5 py-1 rounded-xl text-[10px] text-amber-300 font-black mt-2 transition-all cursor-pointer"
-                          id="view-seller-reviews-btn"
-                        >
-                          <Star size={11} className="fill-current text-amber-400" />
-                          {sellerRating.count > 0 ? `${sellerRating.average} (${sellerRating.count} reviews)` : "New Seller (No reviews)"}
-                        </button>
-                      )}
-                    </div>
-                    <div className="w-9 h-9 bg-slate-800 rounded-full flex items-center justify-center font-bold text-sky-400 border border-slate-700 uppercase text-xs">
+                {/* Verified Seller info */}
+                <div 
+                  onClick={() => setShowReviews(true)}
+                  className="bg-white p-4 shadow-xs border-y border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-slate-100 rounded-full border border-slate-200/80 flex items-center justify-center text-indigo-600 font-bold text-sm uppercase shadow-inner">
                       {selectedPart.contactName.substring(0, 2)}
                     </div>
-                  </div>
-
-                  {/* Actions: In-App Chat, call, whatsapp */}
-                  <div className="space-y-2">
-                    {onStartChat && (
-                      <button
-                        onClick={() => {
-                          if (selectedPart.sold) return;
-                          onStartChat(selectedPart);
-                          setSelectedPart(null); // Close the detail drawer so the chat window overlay is visible
-                        }}
-                        disabled={selectedPart.sold}
-                        className={`w-full flex items-center justify-center gap-2 font-black py-2.5 rounded-2xl text-xs transition-all active:scale-[0.98] shadow-md cursor-pointer ${
-                          selectedPart.sold
-                            ? "bg-slate-700 text-slate-400 cursor-not-allowed opacity-60"
-                            : "bg-indigo-600 hover:bg-indigo-500 text-white"
-                        }`}
-                        id="inapp-chat-btn"
-                      >
-                        <MessageSquare size={14} />
-                        {selectedPart.sold ? t("soldOut") : t("inAppChat")}
-                      </button>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      <a
-                        href={`tel:${selectedPart.contactPhone}`}
-                        className="flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-400 text-white font-bold py-2.5 rounded-2xl text-xs transition-all active:scale-[0.98]"
-                        id="call-seller-btn"
-                      >
-                        <Phone size={13} />
-                        {t("callSeller")}
-                      </a>
-                      <a
-                        href={`https://wa.me/${selectedPart.contactPhone.replace(/[^0-9]/g, "")}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 rounded-2xl text-xs transition-all active:scale-[0.98]"
-                        id="whatsapp-seller-btn"
-                      >
-                        <MessageSquare size={13} />
-                        {t("whatsApp")}
-                      </a>
+                    <div>
+                      <span className="text-[9px] text-indigo-600 font-black tracking-widest block uppercase leading-none">Verified Seller</span>
+                      <h5 className="text-xs font-black text-slate-800 mt-1">{selectedPart.contactName}</h5>
+                      
+                      {/* Rating details button */}
+                      {sellerRating ? (
+                        <div className="flex items-center gap-0.5 mt-0.5">
+                          <Star size={11} className="fill-current text-amber-500" />
+                          <span className="text-[10px] text-slate-500 font-bold">
+                            {sellerRating.count > 0 ? `${sellerRating.average} (${sellerRating.count} reviews)` : "New Seller (No reviews)"}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">Click to view reviews</span>
+                      )}
                     </div>
                   </div>
+                  <ChevronRight size={18} className="text-slate-400" />
+                </div>
+
+                {/* Map approximate location card */}
+                <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-3">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-l-3 border-indigo-600 pl-2">
+                    Posted In
+                  </h4>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
+                    <MapPin size={14} className="text-indigo-600" />
+                    <span>{selectedPart.district || selectedPart.location}, {selectedPart.state || "All India"}</span>
+                  </div>
+                  <GMap
+                    lat={selectedPart.lat}
+                    lng={selectedPart.lng}
+                    state={selectedPart.state}
+                    district={selectedPart.district}
+                    height="180px"
+                  />
                 </div>
               </div>
-            </motion.div>
+            </div>
+
+            {/* Sticky Bottom Call / Chat Action Bar */}
+            <div className="absolute bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex items-center gap-3 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+              {onStartChat && (
+                <button
+                  onClick={() => {
+                    if (selectedPart.sold) return;
+                    onStartChat(selectedPart);
+                    setSelectedPart(null); // Close the detail drawer so the chat window overlay is visible
+                  }}
+                  disabled={selectedPart.sold}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-md font-black text-xs uppercase tracking-wider shadow-xs transition-all active:scale-[0.98] cursor-pointer ${
+                    selectedPart.sold
+                      ? "bg-slate-100 text-slate-400 cursor-not-allowed opacity-60"
+                      : "bg-teal-600 hover:bg-teal-500 text-white"
+                  }`}
+                  id="inapp-chat-btn"
+                >
+                  <MessageSquare size={14} />
+                  {selectedPart.sold ? t("soldOut") : "Chat Now"}
+                </button>
+              )}
+              <a
+                href={`tel:${selectedPart.contactPhone}`}
+                className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-md font-black text-xs uppercase tracking-wider shadow-xs transition-all active:scale-[0.98] text-center"
+                id="call-seller-btn"
+              >
+                <Phone size={13} />
+                {t("callSeller")}
+              </a>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1089,6 +1207,291 @@ export default function HomeScreen({ parts, onFavoriteToggle, favorites, onStart
                 >
                   Show Results
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Home Location Selector Modal */}
+      <AnimatePresence>
+        {showLocationModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowLocationModal(false)}
+            className="absolute inset-0 bg-black/60 z-35 flex items-end"
+            id="location-selector-backdrop"
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 220 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-t-[32px] w-full h-[80%] flex flex-col shadow-2xl relative text-slate-900 overflow-hidden"
+              id="location-selector-modal-body"
+            >
+              {/* Modal Header */}
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+                <div>
+                  <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                    Select Location
+                  </h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {selectedState === "All States" ? "All India" : selectedDistrict === "All Districts" ? `${selectedState} > All Districts` : `${selectedState} > ${selectedDistrict}`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowLocationModal(false)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 p-1.5 rounded-full transition-colors"
+                  id="close-location-modal-btn"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Search Box */}
+              <div className="p-3.5 border-b border-slate-100 shrink-0 bg-white">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={locSearchQuery}
+                    onChange={(e) => {
+                      setLocSearchQuery(e.target.value);
+                      // Reset active browsing state if search is active
+                      if (e.target.value.trim()) {
+                        setLocActiveState(null);
+                      }
+                    }}
+                    placeholder="Search states or districts (e.g. Pune, Karnataka)..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-8 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                    id="location-search-input"
+                  />
+                  {locSearchQuery && (
+                    <button
+                      onClick={() => setLocSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Content / Lists */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {locSearchQuery.trim() ? (
+                  /* --- SEARCH RESULTS VIEW --- */
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block px-1 mb-2">
+                      Search Results
+                    </span>
+
+                    {/* All India option if matched */}
+                    {("all india".includes(locSearchQuery.trim().toLowerCase()) || "india".includes(locSearchQuery.trim().toLowerCase())) && (
+                      <button
+                        onClick={() => {
+                          setSelectedState("All States");
+                          setSelectedDistrict("All Districts");
+                          setShowLocationModal(false);
+                        }}
+                        className="w-full text-left px-3.5 py-3 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between border border-transparent hover:border-slate-100"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Compass size={14} className="text-sky-500 shrink-0" />
+                          <span className="text-xs font-bold text-slate-800">All India</span>
+                        </div>
+                        <span className="text-[9px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-mono font-bold uppercase">Default</span>
+                      </button>
+                    )}
+
+                    {/* State & District matches */}
+                    {(() => {
+                      const query = locSearchQuery.trim().toLowerCase();
+                      const items: React.ReactNode[] = [];
+                      
+                      INDIAN_STATES_AND_DISTRICTS.forEach((s) => {
+                        // Check state name match
+                        if (s.state.toLowerCase().includes(query)) {
+                          items.push(
+                            <button
+                              key={`state-${s.state}`}
+                              onClick={() => {
+                                // Transition to showing districts for this state
+                                setLocActiveState(s.state);
+                                setLocSearchQuery(""); // Clear search to show district list directly
+                              }}
+                              className="w-full text-left px-3.5 py-3 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between border border-transparent hover:border-slate-100"
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <MapPin size={14} className="text-indigo-500 shrink-0" />
+                                <span className="text-xs font-bold text-slate-800">{s.state}</span>
+                              </div>
+                              <span className="text-[9px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded font-mono font-bold uppercase">State</span>
+                            </button>
+                          );
+                        }
+
+                        // Check district matches
+                        s.districts.forEach((d) => {
+                          if (d.toLowerCase().includes(query)) {
+                            items.push(
+                              <button
+                                key={`dist-${s.state}-${d}`}
+                                onClick={() => {
+                                  setSelectedState(s.state);
+                                  setSelectedDistrict(d);
+                                  setShowLocationModal(false);
+                                }}
+                                className="w-full text-left px-3.5 py-3 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between border border-transparent hover:border-slate-100"
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <MapPin size={14} className="text-emerald-500 shrink-0" />
+                                  <span className="text-xs font-bold text-slate-800">
+                                    {s.state} <span className="text-slate-400 font-medium">›</span> {d}
+                                  </span>
+                                </div>
+                                <span className="text-[9px] bg-emerald-50 text-emerald-500 px-1.5 py-0.5 rounded font-mono font-bold uppercase">District</span>
+                              </button>
+                            );
+                          }
+                        });
+                      });
+
+                      if (items.length === 0 && !("all india".includes(query) || "india".includes(query))) {
+                        return (
+                          <div className="text-center py-8">
+                            <span className="text-xs text-slate-400 font-medium">No states or districts match your search</span>
+                          </div>
+                        );
+                      }
+
+                      return items;
+                    })()}
+                  </div>
+                ) : locActiveState ? (
+                  /* --- DISTRICTS LIST FOR ACTIVE STATE --- */
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <button
+                        onClick={() => setLocActiveState(null)}
+                        className="text-xs font-bold text-sky-500 hover:text-sky-600 flex items-center gap-1"
+                        id="loc-back-to-states-btn"
+                      >
+                        ← Back to States
+                      </button>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        {locActiveState} Districts
+                      </span>
+                    </div>
+
+                    {/* All Districts of this State option */}
+                    <button
+                      onClick={() => {
+                        setSelectedState(locActiveState);
+                        setSelectedDistrict("All Districts");
+                        setShowLocationModal(false);
+                      }}
+                      className="w-full text-left px-3.5 py-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors flex items-center justify-between border border-transparent hover:border-slate-100"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Compass size={14} className="text-indigo-400 shrink-0" />
+                        <span className="text-xs font-bold text-slate-800">All Districts in {locActiveState}</span>
+                      </div>
+                      <span className="text-[9px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded font-mono font-bold uppercase">All Districts</span>
+                    </button>
+
+                    {/* List of Districts */}
+                    {(INDIAN_STATES_AND_DISTRICTS.find(s => s.state === locActiveState)?.districts || []).map((d) => {
+                      const isCurrentlySelected = selectedState === locActiveState && selectedDistrict === d;
+                      return (
+                        <button
+                          key={d}
+                          onClick={() => {
+                            setSelectedState(locActiveState);
+                            setSelectedDistrict(d);
+                            setShowLocationModal(false);
+                          }}
+                          className={`w-full text-left px-3.5 py-3 rounded-xl transition-colors flex items-center justify-between border ${
+                            isCurrentlySelected 
+                              ? "bg-sky-50 border-sky-100 text-sky-900" 
+                              : "border-transparent hover:bg-slate-50 hover:border-slate-100 text-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <MapPin size={14} className={isCurrentlySelected ? "text-sky-500 shrink-0" : "text-slate-400 shrink-0"} />
+                            <span className="text-xs font-bold">{d}</span>
+                          </div>
+                          {isCurrentlySelected && (
+                            <span className="text-[9px] bg-sky-500 text-white px-1.5 py-0.5 rounded font-mono font-bold uppercase">Selected</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* --- DEFAULT STATES LIST --- */
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block px-1 mb-2">
+                      All Regions
+                    </span>
+
+                    {/* All India default option */}
+                    <button
+                      onClick={() => {
+                        setSelectedState("All States");
+                        setSelectedDistrict("All Districts");
+                        setShowLocationModal(false);
+                      }}
+                      className={`w-full text-left px-3.5 py-3 rounded-xl transition-colors flex items-center justify-between border ${
+                        selectedState === "All States"
+                          ? "bg-sky-50 border-sky-100 text-sky-900"
+                          : "border-transparent hover:bg-slate-50 hover:border-slate-100 text-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Compass size={14} className={selectedState === "All States" ? "text-sky-500 shrink-0" : "text-slate-400 shrink-0"} />
+                        <span className="text-xs font-bold">All India</span>
+                      </div>
+                      <span className="text-[9px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-mono font-bold uppercase">Default</span>
+                    </button>
+
+                    <div className="border-t border-slate-100 my-2"></div>
+
+                    {/* List of States */}
+                    {INDIAN_STATES_AND_DISTRICTS.map((s) => {
+                      const isStateSelected = selectedState === s.state;
+                      return (
+                        <button
+                          key={s.state}
+                          onClick={() => {
+                            // Immediately transition to show district list for this state
+                            setLocActiveState(s.state);
+                          }}
+                          className={`w-full text-left px-3.5 py-3 rounded-xl transition-colors flex items-center justify-between border ${
+                            isStateSelected 
+                              ? "bg-slate-50 border-slate-100 text-indigo-900" 
+                              : "border-transparent hover:bg-slate-50 hover:border-slate-100 text-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <MapPin size={14} className={isStateSelected ? "text-indigo-500 shrink-0" : "text-slate-400 shrink-0"} />
+                            <span className="text-xs font-bold">{s.state}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-mono font-bold">
+                              {s.districts.length} districts
+                            </span>
+                            <ChevronRight size={12} className="text-slate-400" />
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </motion.div>
           </motion.div>

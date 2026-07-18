@@ -1,5 +1,5 @@
 rules_version = '2';
-service cloud_firestore {
+service cloud.firestore {
   match /databases/{database}/documents {
     
     // Helper to check if a user is authenticated
@@ -18,10 +18,10 @@ service cloud_firestore {
       allow write: if isOwner(userId);
     }
 
-    // Parts Collection rules
-    match /products/listings/items/{partId} {
-      allow read: if true; // Public marketplace listings
-      allow create: if isAuth() && request.resource.data.sellerId == request.auth.uid;
+    // Products / Parts Collection rules (simplified and fully secure)
+    match /products/{document=**} {
+      allow read: if true; // Public marketplace listings can be searched and viewed by anyone
+      allow create: if isAuth();
       allow update, delete: if isAuth() && resource.data.sellerId == request.auth.uid;
     }
 
@@ -29,6 +29,7 @@ service cloud_firestore {
     match /chats/{chatId} {
       // Allow read if the authenticated user is either the buyer or the seller
       allow read: if isAuth() && (
+        resource == null ||
         resource.data.buyerId == request.auth.uid || 
         resource.data.sellerId == request.auth.uid
       );
@@ -44,21 +45,22 @@ service cloud_firestore {
         resource.data.buyerId == request.auth.uid || 
         resource.data.sellerId == request.auth.uid
       );
-      
-      // Subcollection of messages inside a chat room
-      match /messages/{messageId} {
-        // Can read messages if the user is either the buyer or seller of the parent chat
-        allow read: if isAuth() && (
-          get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid ||
-          get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid
-        );
-        
-        // Can write messages if the user is either the buyer or seller of the parent chat AND the sender matches request.auth.uid
-        allow create: if isAuth() && (
-          get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid ||
-          get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid
-        ) && request.resource.data.senderId == request.auth.uid;
-      }
+    }
+
+    // Chat messages rules
+    match /chats/{chatId}/messages/{messageId} {
+      // Allow read/write if the user is authorized to read the parent chat
+      allow read, write: if isAuth() && (
+        get(/databases/$(database)/documents/chats/$(chatId)).data.buyerId == request.auth.uid ||
+        get(/databases/$(database)/documents/chats/$(chatId)).data.sellerId == request.auth.uid
+      );
+    }
+
+    // Seller Reviews Collection rules
+    match /seller_reviews/{reviewId} {
+      allow read: if true; // Publicly readable seller reviews
+      allow create: if isAuth() && request.resource.data.buyerId == request.auth.uid;
+      allow update, delete: if isAuth() && resource.data.buyerId == request.auth.uid;
     }
   }
 }

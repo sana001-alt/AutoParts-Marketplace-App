@@ -29,11 +29,7 @@ import { User, SparePart } from "../types";
 import { 
   signOut, 
   deleteSparePartListing, 
-  fetchSellerReviews,
-  getDynamicFirebaseConfig,
-  saveDynamicFirebaseConfig,
-  clearDynamicFirebaseConfig,
-  isUsingFirebase
+  fetchSellerReviews
 } from "../lib/firebase";
 import { INDIAN_STATES_AND_DISTRICTS } from "../data/indianLocations";
 import MapLocationModal from "./MapLocationModal";
@@ -51,7 +47,7 @@ interface ProfileScreenProps {
   onUpdatePrice?: (partId: string, newPrice: number) => void;
 }
 
-type SubScreen = "menu" | "personal_info" | "my_listings" | "saved" | "privacy" | "support" | "about" | "my_reviews" | "firebase_config";
+type SubScreen = "menu" | "personal_info" | "my_listings" | "saved" | "privacy" | "support" | "about" | "my_reviews";
 
 export default function ProfileScreen({ 
   currentUser, 
@@ -84,27 +80,6 @@ export default function ProfileScreen({
 
   // Privacy confirm state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  // Firebase Live Connection Form State
-  const [fbApiKey, setFbApiKey] = useState("");
-  const [fbAuthDomain, setFbAuthDomain] = useState("");
-  const [fbProjectId, setFbProjectId] = useState("");
-  const [fbStorageBucket, setFbStorageBucket] = useState("");
-  const [fbMessagingSenderId, setFbMessagingSenderId] = useState("");
-  const [fbAppId, setFbAppId] = useState("");
-  const [fbSaveSuccess, setFbSaveSuccess] = useState(false);
-
-  useEffect(() => {
-    if (activeSubScreen === "firebase_config") {
-      const currentConfig = getDynamicFirebaseConfig();
-      setFbApiKey(currentConfig.apiKey);
-      setFbAuthDomain(currentConfig.authDomain);
-      setFbProjectId(currentConfig.projectId);
-      setFbStorageBucket(currentConfig.storageBucket);
-      setFbMessagingSenderId(currentConfig.messagingSenderId);
-      setFbAppId(currentConfig.appId);
-    }
-  }, [activeSubScreen]);
 
   // Seller ratings and reviews for logged-in user
   const [userReviews, setUserReviews] = useState<any[]>([]);
@@ -399,31 +374,6 @@ export default function ProfileScreen({
                   </div>
                 </div>
                 <ChevronRight size={14} className="text-slate-400" />
-              </button>
-
-              {/* Firebase Server Connection Configuration Option */}
-              <button
-                onClick={() => setActiveSubScreen("firebase_config")}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors text-left"
-                id="menu-opt-firebase-config"
-              >
-                <div className="flex items-center gap-3.5">
-                  <span className="p-2.5 bg-orange-50 text-orange-500 rounded-2xl">
-                    <Database size={16} />
-                  </span>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800">Firebase Live Connection</h4>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      {isUsingFirebase() ? "Connected to custom live Firebase DB" : "Link app to your own Firebase project DB"}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${isUsingFirebase() ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-600"}`}>
-                    {isUsingFirebase() ? "LIVE" : "LOCAL"}
-                  </span>
-                  <ChevronRight size={14} className="text-slate-400" />
-                </div>
               </button>
 
               {/* Help & Support Option */}
@@ -1264,173 +1214,6 @@ export default function ProfileScreen({
                   ))}
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 9. FIREBASE DYNAMIC CONNECTION SETTINGS SCREEN */}
-      {activeSubScreen === "firebase_config" && (
-        <div className="flex-1 flex flex-col animate-fade-in bg-white" id="profile-sub-firebase-config">
-          {/* Sub Header */}
-          <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-100 sticky top-0 bg-white z-10">
-            <button
-              onClick={() => setActiveSubScreen("menu")}
-              className="p-1.5 hover:bg-slate-50 text-slate-700 rounded-xl transition-all"
-              id="back-btn-firebase-config"
-            >
-              <ArrowLeft size={16} />
-            </button>
-            <h2 className="text-sm font-extrabold text-slate-800">Firebase Live Connection</h2>
-          </div>
-
-          <div className="p-5 space-y-5 overflow-y-auto flex-1">
-            <div className="bg-orange-50 border border-orange-200 p-4 rounded-2xl space-y-2">
-              <div className="flex items-center gap-2 text-orange-800 font-extrabold text-xs">
-                <ShieldAlert size={16} className="text-orange-600 shrink-0" />
-                Custom Database Configuration
-              </div>
-              <p className="text-[10px] text-orange-700 leading-relaxed font-semibold">
-                You can link this C2C Auto Parts portal directly to your own custom, live Google Firebase production database. Entering your credentials below will initialize real-time cloud sync for user authorization, listings, and in-app chats.
-              </p>
-            </div>
-
-            {fbSaveSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-2xl text-[11px] font-bold flex items-center gap-2 animate-bounce">
-                <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-                Firebase credentials stored! Reloading application...
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {/* API Key */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block">API KEY (apiKey)</label>
-                <input
-                  type="text"
-                  value={fbApiKey}
-                  onChange={(e) => setFbApiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-3.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-
-              {/* Auth Domain */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block">AUTH DOMAIN (authDomain)</label>
-                <input
-                  type="text"
-                  value={fbAuthDomain}
-                  onChange={(e) => setFbAuthDomain(e.target.value)}
-                  placeholder="your-project.firebaseapp.com"
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-3.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-
-              {/* Project ID */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block">PROJECT ID (projectId)</label>
-                <input
-                  type="text"
-                  value={fbProjectId}
-                  onChange={(e) => setFbProjectId(e.target.value)}
-                  placeholder="your-project-id"
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-3.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-
-              {/* Storage Bucket */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block">STORAGE BUCKET (storageBucket)</label>
-                <input
-                  type="text"
-                  value={fbStorageBucket}
-                  onChange={(e) => setFbStorageBucket(e.target.value)}
-                  placeholder="your-project.appspot.com"
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-3.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-
-              {/* Messaging Sender ID */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block">MESSAGING SENDER ID (messagingSenderId)</label>
-                <input
-                  type="text"
-                  value={fbMessagingSenderId}
-                  onChange={(e) => setFbMessagingSenderId(e.target.value)}
-                  placeholder="873294823904"
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-3.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-
-              {/* App ID */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 block">APP ID (appId)</label>
-                <input
-                  type="text"
-                  value={fbAppId}
-                  onChange={(e) => setFbAppId(e.target.value)}
-                  placeholder="1:873294823904:web:c081734bc1a"
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-2.5 px-3.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl space-y-2">
-              <div className="flex items-center gap-1.5 text-slate-700 font-extrabold text-[11px]">
-                <Info size={14} className="text-indigo-500 shrink-0" />
-                How to get these keys?
-              </div>
-              <p className="text-[10px] text-slate-500 leading-relaxed font-medium">
-                1. Open your <span className="font-extrabold text-slate-700">Firebase Console</span>.<br />
-                2. Navigate to your <span className="font-extrabold text-slate-700">Project Settings</span> (Gear Icon).<br />
-                3. Scroll down to <span className="font-extrabold text-slate-700">Your Apps</span> and choose/create a <span className="font-extrabold text-slate-700">Web App</span>.<br />
-                4. Copy the parameters inside the <code className="bg-slate-200/50 px-1 py-0.5 rounded text-indigo-600 font-mono text-[9px]">firebaseConfig</code> configuration block and paste them above.
-              </p>
-            </div>
-
-            <div className="pt-2 space-y-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  saveDynamicFirebaseConfig({
-                    apiKey: fbApiKey,
-                    authDomain: fbAuthDomain,
-                    projectId: fbProjectId,
-                    storageBucket: fbStorageBucket,
-                    messagingSenderId: fbMessagingSenderId,
-                    appId: fbAppId
-                  });
-                  setFbSaveSuccess(true);
-                  setTimeout(() => {
-                    window.location.reload();
-                  }, 1200);
-                }}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold py-3.5 rounded-2xl text-xs transition-all active:scale-[0.98] shadow-md cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Database size={14} />
-                Save & Connect Firebase Database
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  clearDynamicFirebaseConfig();
-                  setFbApiKey("");
-                  setFbAuthDomain("");
-                  setFbProjectId("");
-                  setFbStorageBucket("");
-                  setFbMessagingSenderId("");
-                  setFbAppId("");
-                  setFbSaveSuccess(true);
-                  setTimeout(() => {
-                    window.location.reload();
-                  }, 1200);
-                }}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-4 rounded-2xl text-xs transition-colors flex items-center justify-center gap-2"
-              >
-                Reset to Default Local Mock Mode
-              </button>
             </div>
           </div>
         </div>

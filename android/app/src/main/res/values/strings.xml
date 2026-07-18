@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Auto Parts</string>
     <string name="title_activity_main">Auto Parts</string>
-    <string name="package_name">com.autoparts.marketplace</string>
-    <string name="custom_url_scheme">com.autoparts.marketplace</string>
+    <string name="package_name">com.autoparts.app</string>
+    <string name="custom_url_scheme">com.autoparts.app</string>
 </resources>

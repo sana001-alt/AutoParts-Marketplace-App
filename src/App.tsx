@@ -15,7 +15,10 @@ import {
   Maximize2,
   Star,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ArrowLeft,
+  Share2,
+  Heart
 } from "lucide-react";
 import PhoneSimulator from "./components/PhoneSimulator";
 import AuthScreen from "./components/AuthScreen";
@@ -29,7 +32,7 @@ import InAppNotification from "./components/InAppNotification";
 import SellerReviewsView from "./components/SellerReviewsView";
 import GMap from "./components/GMap";
 import { User, SparePart, Chat, Message } from "./types";
-import { fetchSpareParts, subscribeToAuth, getOrCreateChat, fetchUserChats, fetchSellerReviews, updateSparePartListing } from "./lib/firebase";
+import { fetchSpareParts, subscribeToAuth, getOrCreateChat, fetchUserChats, fetchSellerReviews, updateSparePartListing, updateUserProfile } from "./lib/firebase";
 import { motion, AnimatePresence } from "motion/react";
 import { useLanguage } from "./lib/LanguageContext";
 import { translateDynamic } from "./lib/translations";
@@ -100,6 +103,7 @@ export default function App() {
 
   // Master Detailed Seller Rating states
   const [detailedSellerRating, setDetailedSellerRating] = useState<{ average: number; count: number } | null>(null);
+  const [showShareToast, setShowShareToast] = useState(false);
   const [showDetailedReviews, setShowDetailedReviews] = useState(false);
 
   useEffect(() => {
@@ -301,7 +305,7 @@ export default function App() {
   };
 
   // 5b. Handle Profile Update
-  const handleUpdateUser = (updatedUser: User) => {
+  const handleUpdateUser = async (updatedUser: User) => {
     setCurrentUser(updatedUser);
     localStorage.setItem("autoparts_current_user", JSON.stringify(updatedUser));
     const usersRaw = localStorage.getItem("autoparts_users");
@@ -321,6 +325,19 @@ export default function App() {
           : u
       );
       localStorage.setItem("autoparts_users", JSON.stringify(updatedUsers));
+    }
+
+    try {
+      await updateUserProfile(updatedUser.id, {
+        name: updatedUser.name,
+        phone: updatedUser.phone,
+        state: updatedUser.state,
+        district: updatedUser.district,
+        lat: updatedUser.lat,
+        lng: updatedUser.lng
+      });
+    } catch (e) {
+      console.error("Failed to update user profile in Firestore:", e);
     }
   };
 
@@ -563,30 +580,91 @@ export default function App() {
           <AnimatePresence>
             {detailedPart && (
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setDetailedPart(null)}
-                className="absolute inset-0 bg-black/60 z-30 flex items-end"
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "spring", damping: 26, stiffness: 220 }}
+                className="absolute inset-0 bg-slate-50 z-30 flex flex-col text-slate-900 overflow-hidden"
                 id="master-detail-backdrop"
               >
-                <motion.div
-                  initial={{ y: "100%" }}
-                  animate={{ y: 0 }}
-                  exit={{ y: "100%" }}
-                  transition={{ type: "spring", damping: 25, stiffness: 220 }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="bg-white rounded-t-[32px] w-full max-h-[80%] overflow-y-auto flex flex-col shadow-2xl relative text-slate-900"
-                  id="master-detail-modal"
-                >
-                  <button
-                    onClick={() => setDetailedPart(null)}
-                    className="absolute top-4 right-4 bg-white text-slate-900 p-2.5 rounded-full hover:bg-slate-100 shadow-xl border border-slate-200/80 hover:scale-105 active:scale-95 z-20 transition-all flex items-center justify-center cursor-pointer"
-                    id="close-master-detail-btn"
-                  >
-                    <X size={18} strokeWidth={3} />
-                  </button>
+                {/* Custom Toast Alert for sharing link */}
+                <AnimatePresence>
+                  {showShareToast && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -20 }}
+                      animate={{ opacity: 1, y: 10 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      className="absolute top-14 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-full shadow-lg font-bold flex items-center gap-2 z-[99]"
+                    >
+                      <Sparkles size={14} className="text-amber-400" />
+                      <span>Link copied to clipboard!</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
+                {/* Sticky Top Header Bar */}
+                <div className="sticky top-0 bg-white border-b border-slate-100 px-3.5 py-2.5 flex items-center justify-between z-20 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setDetailedPart(null)}
+                      className="p-1.5 hover:bg-slate-100 rounded-full transition-all active:scale-95 cursor-pointer text-slate-800"
+                      id="close-master-detail-btn"
+                    >
+                      <ArrowLeft size={22} strokeWidth={2.5} />
+                    </button>
+                    <div className="flex flex-col">
+                      <span className="font-extrabold text-xs text-slate-900 tracking-wide uppercase">Ad Details</span>
+                      <span className="text-[10px] text-slate-400 font-bold font-mono">ID: {detailedPart.id.substring(0, 8).toUpperCase()}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Share Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const shareUrl = window.location.origin + "?part=" + detailedPart.id;
+                        if (navigator.share) {
+                          navigator.share({
+                            title: detailedPart.title,
+                            text: `Check out this ${detailedPart.carBrand} ${detailedPart.carModel} ${detailedPart.title} on Autoparts India!`,
+                            url: shareUrl
+                          }).catch(() => {
+                            navigator.clipboard.writeText(shareUrl);
+                            setShowShareToast(true);
+                            setTimeout(() => setShowShareToast(false), 2000);
+                          });
+                        } else {
+                          navigator.clipboard.writeText(shareUrl);
+                          setShowShareToast(true);
+                          setTimeout(() => setShowShareToast(false), 2000);
+                        }
+                      }}
+                      className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-95 text-slate-700 cursor-pointer"
+                      title="Share"
+                    >
+                      <Share2 size={20} />
+                    </button>
+
+                    {/* Heart/Favorite Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFavoriteToggle(detailedPart.id);
+                      }}
+                      className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-95 cursor-pointer text-slate-700"
+                      title="Favorite"
+                    >
+                      <Heart
+                        size={20}
+                        className={favorites.includes(detailedPart.id) ? "fill-red-500 text-red-500 stroke-red-500 animate-pulse" : "text-slate-700"}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable Content */}
+                <div className="flex-1 overflow-y-auto pb-24 scrollbar-none bg-slate-50">
                   {/* Cover Image Carousel */}
                   {(() => {
                     const imageList: string[] = [];
@@ -632,7 +710,7 @@ export default function App() {
 
                     return (
                       <div 
-                        className="h-64 w-full bg-slate-100 relative cursor-pointer group overflow-hidden select-none touch-pan-y"
+                        className="h-80 w-full bg-slate-950 relative cursor-pointer group overflow-hidden select-none touch-pan-y flex items-center justify-center border-b border-slate-200"
                         onTouchStart={handleTouchStartLocal}
                         onTouchEnd={handleTouchEndLocal}
                         onClick={() => setIsGalleryOpen(true)}
@@ -644,11 +722,11 @@ export default function App() {
                             src={imageList[detailImageIndex] || detailedPart.imageUrl}
                             alt={detailedPart.title}
                             referrerPolicy="no-referrer"
-                            initial={{ opacity: 0.8, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0.8, x: -20 }}
+                            initial={{ opacity: 0.85, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0.85, scale: 0.98 }}
                             transition={{ duration: 0.2 }}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-contain max-h-80"
                           />
                         </AnimatePresence>
 
@@ -660,7 +738,7 @@ export default function App() {
                                 e.stopPropagation();
                                 setDetailImageIndex(prev => (prev > 0 ? prev - 1 : imageList.length - 1));
                               }}
-                              className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 hover:bg-indigo-600 text-white rounded-full transition-all z-20 cursor-pointer shadow-md border border-white/5 opacity-0 group-hover:opacity-100 md:opacity-80"
+                              className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/45 hover:bg-indigo-600 text-white rounded-full transition-all z-10 cursor-pointer shadow-md opacity-0 group-hover:opacity-100 md:opacity-80 flex items-center justify-center"
                             >
                               <ChevronLeft size={16} />
                             </button>
@@ -669,16 +747,16 @@ export default function App() {
                                 e.stopPropagation();
                                 setDetailImageIndex(prev => (prev < imageList.length - 1 ? prev + 1 : 0));
                               }}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 hover:bg-indigo-600 text-white rounded-full transition-all z-20 cursor-pointer shadow-md border border-white/5 opacity-0 group-hover:opacity-100 md:opacity-80"
+                              className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/45 hover:bg-indigo-600 text-white rounded-full transition-all z-10 cursor-pointer shadow-md opacity-0 group-hover:opacity-100 md:opacity-80 flex items-center justify-center"
                             >
                               <ChevronRight size={16} />
                             </button>
                           </>
                         )}
 
-                        {/* Progress indicators dots */}
+                        {/* Progress indicators dots or pills */}
                         {imageList.length > 1 && (
-                          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
+                          <div className="absolute bottom-4 left-4 flex items-center gap-1.5 z-10">
                             {imageList.map((_, idx) => (
                               <button
                                 key={idx}
@@ -687,106 +765,145 @@ export default function App() {
                                   setDetailImageIndex(idx);
                                 }}
                                 className={`h-1.5 rounded-full transition-all duration-300 ${
-                                  idx === detailImageIndex ? "w-4 bg-indigo-500" : "w-1.5 bg-white/40"
+                                  idx === detailImageIndex ? "w-4 bg-indigo-500" : "w-1.5 bg-white/45"
                                 }`}
                               />
                             ))}
                           </div>
                         )}
 
-                        {/* Gallery hint badge */}
-                        <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-sm text-[9px] font-black tracking-wider text-white px-2.5 py-1.5 rounded-xl flex items-center gap-1 border border-white/10 opacity-90 group-hover:opacity-100 transition-all duration-300 z-10">
-                          <Maximize2 size={10} className="text-indigo-400" />
-                          VIEW GALLERY ({detailImageIndex + 1}/{imageList.length})
+                        {/* Image Counter Badge (OLX style) */}
+                        <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-xs text-[11px] font-bold text-white px-2.5 py-1 rounded-md tracking-wider font-mono z-10">
+                          {detailImageIndex + 1} / {imageList.length}
+                        </div>
+
+                        {/* Gallery hint badge (Top Left) */}
+                        <div className="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-sm text-[10px] font-black tracking-wider text-white px-2.5 py-1.5 rounded-md flex items-center gap-1 border border-white/10 opacity-90 transition-all z-10">
+                          <Maximize2 size={10} className="text-indigo-400 animate-pulse" />
+                          VIEW FULLSCREEN
                         </div>
 
                         {detailedPart.sold && (
-                          <div className="absolute inset-0 bg-slate-950/65 flex items-center justify-center z-10 animate-fade-in">
-                            <span className="text-sm font-black tracking-widest text-white bg-rose-600 px-4 py-1.5 rounded-lg uppercase shadow-xl border border-rose-500">
+                          <div className="absolute inset-0 bg-slate-950/65 flex items-center justify-center z-20">
+                            <span className="text-xs font-black tracking-widest text-white bg-rose-600 px-4 py-2 rounded-md uppercase shadow-xl border border-rose-500">
                               SOLD OUT
                             </span>
                           </div>
                         )}
-
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-5 pt-10 text-white z-10 pointer-events-none">
-                          <div className="flex gap-1.5 flex-wrap mb-1.5 pointer-events-auto">
-                            <span className="inline-block px-2.5 py-0.5 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase tracking-wider">
-                              {detailedPart.carBrand}
-                            </span>
-                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border border-white/10 ${getConditionColor(detailedPart.condition)}`}>
-                              {detailedPart.condition}
-                            </span>
-                          </div>
-                          <h3 className="text-base font-black tracking-tight leading-snug">
-                            {detailedPart.title}
-                          </h3>
-                          <p className="text-xs text-slate-300 mt-1 font-medium">
-                            Compatibility: <span className="font-extrabold text-white">{detailedPart.carBrand} {detailedPart.carModel}</span>
-                          </p>
-                        </div>
                       </div>
                     );
                   })()}
 
-                  <div className="p-5 space-y-5">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-4">
-                      <div>
-                        <span className="text-xs text-slate-400 font-medium block">{t("priceInIndia")}</span>
-                        <span className="text-2xl font-black text-slate-900 tracking-tight">
+                  <div className="space-y-3 mt-3">
+                    {/* Price, Title, Location details */}
+                    <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-1.5">
+                      <div className="flex justify-between items-start">
+                        <span className="text-2xl font-black text-slate-900 tracking-tight font-sans">
                           {formatPrice(detailedPart.price)}
                         </span>
+                        <span className={`inline-block px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${getConditionColor(detailedPart.condition)}`}>
+                          {detailedPart.condition}
+                        </span>
                       </div>
-                      <div className="text-right">
-                        <span className="text-xs text-slate-400 font-medium block">{t("posted")}</span>
-                        <span className="text-xs font-semibold text-slate-700 flex items-center gap-1 mt-1 justify-end">
-                          <Calendar size={12} className="text-slate-400" />
+                      <h3 className="text-sm font-semibold text-slate-800 leading-snug tracking-tight">
+                        {detailedPart.title}
+                      </h3>
+                      <div className="h-px bg-slate-100 my-2.5" />
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                        <span className="flex items-center gap-1 font-bold">
+                          <MapPin size={13} className="text-slate-400 shrink-0" />
+                          {detailedPart.district || detailedPart.location}, {detailedPart.state || "All India"}
+                        </span>
+                        <span>
                           {new Date(detailedPart.createdAt).toLocaleDateString("en-IN", {
                             day: "numeric",
-                            month: "short",
-                            year: "numeric"
+                            month: "short"
                           })}
                         </span>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                        <Info size={13} className="text-slate-400" />
+                    {/* Key attributes/Specification grid */}
+                    <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-l-3 border-indigo-600 pl-2">
+                        Details & Specifications
+                      </h4>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-1">
+                        <div className="flex flex-col border-b border-slate-100 pb-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">Brand</span>
+                          <span className="text-xs font-extrabold text-slate-800 mt-0.5">{detailedPart.carBrand}</span>
+                        </div>
+                        <div className="flex flex-col border-b border-slate-100 pb-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">Model Compatibility</span>
+                          <span className="text-xs font-extrabold text-slate-800 mt-0.5">{detailedPart.carModel}</span>
+                        </div>
+                        <div className="flex flex-col border-b border-slate-100 pb-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">Category</span>
+                          <span className="text-xs font-extrabold text-slate-800 mt-0.5">{detailedPart.category}</span>
+                        </div>
+                        <div className="flex flex-col border-b border-slate-100 pb-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">Condition</span>
+                          <span className="text-xs font-extrabold text-slate-800 mt-0.5">{detailedPart.condition}</span>
+                        </div>
+                        <div className="flex flex-col border-b border-slate-100 pb-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">State</span>
+                          <span className="text-xs font-extrabold text-slate-800 mt-0.5">{detailedPart.state || "All India"}</span>
+                        </div>
+                        <div className="flex flex-col border-b border-slate-100 pb-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">District</span>
+                          <span className="text-xs font-extrabold text-slate-800 mt-0.5">{detailedPart.district || "All Districts"}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Description block */}
+                    <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-2">
+                      <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-l-3 border-indigo-600 pl-2">
                         Description
                       </h4>
-                      <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line font-medium pt-1">
                         {detailedPart.description}
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3.5">
-                      <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-2.5">
-                        <span className="p-2 bg-indigo-50 text-indigo-500 rounded-xl">
-                          <Car size={16} />
-                        </span>
+                    {/* Verified Seller info */}
+                    <div 
+                      onClick={() => setShowDetailedReviews(true)}
+                      className="bg-white p-4 shadow-xs border-y border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-slate-100 rounded-full border border-slate-200/80 flex items-center justify-center text-indigo-600 font-bold text-sm uppercase shadow-inner">
+                          {detailedPart.contactName.substring(0, 2)}
+                        </div>
                         <div>
-                          <span className="text-[10px] text-slate-400 font-medium block leading-none">CATEGORY</span>
-                          <span className="text-xs font-extrabold text-slate-800 block mt-1">{detailedPart.category}</span>
+                          <span className="text-[9px] text-indigo-600 font-black tracking-widest block uppercase leading-none">Verified Seller</span>
+                          <h5 className="text-xs font-black text-slate-800 mt-1">{detailedPart.contactName}</h5>
+                          
+                          {/* Rating details button */}
+                          {detailedSellerRating ? (
+                            <div className="flex items-center gap-0.5 mt-0.5">
+                              <Star size={11} className="fill-current text-amber-500" />
+                              <span className="text-[10px] text-slate-500 font-bold">
+                                {detailedSellerRating.count > 0 ? `${detailedSellerRating.average} (${detailedSellerRating.count} reviews)` : "New Seller (No reviews)"}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Click to view reviews</span>
+                          )}
                         </div>
                       </div>
-
-                      <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-2.5">
-                        <span className="p-2 bg-sky-50 text-sky-500 rounded-xl">
-                          <MapPin size={16} />
-                        </span>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-medium block leading-none">LOCATION</span>
-                          <span className="text-xs font-extrabold text-slate-800 block mt-1">{detailedPart.location}</span>
-                        </div>
-                      </div>
+                      <ChevronRight size={18} className="text-slate-400" />
                     </div>
 
-                    {/* Google Map approximate location */}
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 pl-1">
-                        <MapPin size={13} className="text-indigo-500" />
-                        Seller's Location Map
+                    {/* Map approximate location card */}
+                    <div className="bg-white p-4 shadow-xs border-y border-slate-100 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-l-3 border-indigo-600 pl-2">
+                        Posted In
                       </h4>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-700 font-bold">
+                        <MapPin size={14} className="text-indigo-600" />
+                        <span>{detailedPart.district || detailedPart.location}, {detailedPart.state || "All India"}</span>
+                      </div>
                       <GMap
                         lat={detailedPart.lat}
                         lng={detailedPart.lng}
@@ -795,64 +912,37 @@ export default function App() {
                         height="180px"
                       />
                     </div>
-
-                    <div className="bg-gradient-to-r from-slate-900 to-slate-950 text-white rounded-3xl p-4 shadow-lg">
-                      <div className="flex justify-between items-center mb-4">
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-medium block">CONTACT SELLER</span>
-                          <h5 className="text-sm font-extrabold text-white mt-0.5">{detailedPart.contactName}</h5>
-                          <span className="text-xs text-slate-400">{detailedPart.sellerEmail}</span>
-
-                          {/* Interactive Rating Button */}
-                          {detailedSellerRating && (
-                            <button
-                              onClick={() => setShowDetailedReviews(true)}
-                              className="flex items-center gap-1 bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/25 px-2.5 py-1 rounded-xl text-[10px] text-amber-300 font-black mt-2 transition-all cursor-pointer"
-                              id="view-detailed-reviews-btn"
-                            >
-                              <Star size={11} className="fill-current text-amber-400" />
-                              {detailedSellerRating.count > 0 ? `${detailedSellerRating.average} (${detailedSellerRating.count} reviews)` : "New Seller (No reviews)"}
-                            </button>
-                          )}
-                        </div>
-                        <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center font-bold text-sky-400 border border-slate-700 uppercase">
-                          {detailedPart.contactName.substring(0, 2)}
-                        </div>
-                      </div>
-
-                       <div className="space-y-2">
-                        <button
-                          onClick={() => {
-                            handleStartChat(detailedPart);
-                            setDetailedPart(null); // Close detail dialog so the active chat overlay is visible
-                          }}
-                          className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black py-2.5 rounded-2xl text-xs transition-all active:scale-[0.98] shadow-md cursor-pointer"
-                        >
-                          <MessageSquare size={14} />
-                          {t("inAppChat")}
-                        </button>
-                        <div className="grid grid-cols-2 gap-2.5 pt-1">
-                          <a
-                            href={`tel:${detailedPart.contactPhone}`}
-                            className="flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-400 text-white font-bold py-2.5 rounded-2xl text-xs transition-colors"
-                          >
-                            <Phone size={14} />
-                            {t("callSeller")}
-                          </a>
-                          <a
-                            href={`https://wa.me/${detailedPart.contactPhone.replace(/[^0-9]/g, "")}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 rounded-2xl text-xs transition-colors"
-                          >
-                            <MessageSquare size={14} />
-                            {t("whatsApp")}
-                          </a>
-                        </div>
-                      </div>
-                    </div>
                   </div>
-                </motion.div>
+                </div>
+
+                {/* Sticky Bottom Call / Chat Action Bar */}
+                <div className="absolute bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex items-center gap-3 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+                  <button
+                    onClick={() => {
+                      if (detailedPart.sold) return;
+                      handleStartChat(detailedPart);
+                      setDetailedPart(null); // Close the detail drawer so the chat window overlay is visible
+                    }}
+                    disabled={detailedPart.sold}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-md font-black text-xs uppercase tracking-wider shadow-xs transition-all active:scale-[0.98] cursor-pointer ${
+                      detailedPart.sold
+                        ? "bg-slate-100 text-slate-400 cursor-not-allowed opacity-60"
+                        : "bg-teal-600 hover:bg-teal-500 text-white"
+                    }`}
+                    id="inapp-chat-btn"
+                  >
+                    <MessageSquare size={14} />
+                    {detailedPart.sold ? t("soldOut") : "Chat Now"}
+                  </button>
+                  <a
+                    href={`tel:${detailedPart.contactPhone}`}
+                    className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-md font-black text-xs uppercase tracking-wider shadow-xs transition-all active:scale-[0.98] text-center"
+                    id="call-seller-btn"
+                  >
+                    <Phone size={13} />
+                    {t("callSeller")}
+                  </a>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
